@@ -8,8 +8,6 @@ permissions:
 
 jobs:
   build-and-release:
-    # <<<< اینجا تغییر کرده است >>>>
-    # افزایش زمان تایم‌اوت به حداکثر مقدار ممکن (6 ساعت)
     timeout-minutes: 360
     runs-on: ubuntu-latest
     
@@ -34,20 +32,23 @@ jobs:
           uses: 'local'
           mem: 6144
           run: |
-            # نصب تمام وابستگی‌های سیستمی، شامل zip
-            pkg install -y python311 py311-pip gcc13 openblas zip
+            # <<<< اینجا تغییر کرده است >>>>
+            # نصب تمام وابستگی‌های سیستمی، شامل ابزارهای ساخت
+            pkg install -y python311 py311-pip gcc13 openblas zip pkgconf cmake
             
-            # تنظیم متغیرهای محیطی برای پیدا کردن کامپایلرها
+            # <<<< اینجا تغییر کرده است >>>>
+            # تنظیم متغیرهای محیطی برای پیدا کردن کامپایلرها و کتابخانه‌ها
             export FC=/usr/local/bin/gfortran13
             export CC=/usr/local/bin/gcc13
             export CXX=/usr/local/bin/g++13
+            export PKG_CONFIG_PATH=/usr/local/libdata/pkgconfig
             
             # ساخت فایل نیازمندی‌ها
             echo "scikit-learn" > requirements.txt
             echo "hazm" >> requirements.txt
             echo "pyTelegramBotAPI" >> requirements.txt
             
-            # به‌روزرسانی ابزارهای ساخت
+            # به‌روزرسانی ابزارهای ساخت پایتون
             /usr/local/bin/python3.11 -m pip install --upgrade pip setuptools wheel
 
             echo "--- Building all packages... This is the SLOW part and may take over an hour. ---"
