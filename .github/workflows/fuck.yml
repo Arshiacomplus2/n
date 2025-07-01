@@ -33,6 +33,8 @@ jobs:
         with:
           uses: 'local'
           mem: 6144
+          # <--- [اصلاح ۱] اضافه کردن copy_back برای برگرداندن فایل از VM
+          copy_back: "freebsd-wheels.zip"
           run: |
             # نصب تمام وابستگی‌های سیستمی
             pkg install -y python311 py311-pip gcc13 openblas lapack zip pkgconf cmake git
@@ -47,32 +49,28 @@ jobs:
             # به‌روزرسانی ابزارهای ساخت پایتون
             python3.11 -m pip install --upgrade pip setuptools wheel
 
-            # <--- [اصلاح اصلی] تغییر استراتژی بیلد برای scikit-learn --->
-
-            # ابتدا پکیج‌هایی که مشکل خاصی ندارند را بیلد می‌کنیم
+            # بیلد پکیج‌های ساده‌تر
             echo "--- Building hazm and pyTelegramBotAPI ---"
             python3.11 -m pip wheel --verbose --wheel-dir=./wheels hazm pyTelegramBotAPI
             
-            # حالا scikit-learn را با روش git clone بیلد می‌کنیم تا مشکل نسخه یابی حل شود
+            # کلون و بیلد کردن scikit-learn از ریپازیتوری گیت
             echo "--- Cloning and building scikit-learn from git repository ---"
-            # به یک نسخه مشخص پین می‌کنیم تا بیلد تکرارپذیر باشد (مثلاً 1.5.0)
             SKLEARN_VERSION="1.5.0"
             git clone --depth 1 --branch ${SKLEARN_VERSION} https://github.com/scikit-learn/scikit-learn.git scikit-learn-repo
             
-            # وارد پوشه کلون شده می‌شویم و از آنجا بیلد می‌کنیم
             cd scikit-learn-repo
-            # نقطه (.) به pip می‌گوید که از پوشه فعلی بیلد کن
             python3.11 -m pip wheel --verbose --wheel-dir=../wheels .
-            cd .. # بازگشت به پوشه اصلی
+            cd ..
 
             echo "--- All wheels built successfully! ---"
-
             echo "--- Packaging all wheels into a single zip file... ---"
             zip -r freebsd-wheels.zip wheels/
             
             TAG_NAME="freebsd-wheels-$(date +'%Y%m%d-%H%M%S')"
             echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
-            mv freebsd-wheels.zip /tmp/
+            
+            # <--- [اصلاح ۲] حذف دستور mv، چون copy_back فایل را از پوشه فعلی برمی‌دارد
+            # mv freebsd-wheels.zip /tmp/
 
       - name: Create GitHub Release and Upload Asset
         env:
@@ -80,7 +78,8 @@ jobs:
         run: |
           TAG="${{ steps.build_step.outputs.tag_name }}"
           
-          gh release create "${TAG}" /tmp/freebsd-wheels.zip \
+          # <--- [اصلاح ۳] تغییر مسیر فایل زیپ به مسیر درست در Runner اصلی
+          gh release create "${TAG}" freebsd-wheels.zip \
             --title "FreeBSD Wheels - ${TAG}" \
             --notes "Wheels for Python 3.11 on FreeBSD. Includes scikit-learn, hazm, pyTelegramBotAPI."
 
