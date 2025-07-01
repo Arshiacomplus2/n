@@ -1,4 +1,3 @@
-# نام Workflow شما
 name: Build and Release FreeBSD Wheels
 
 on:
@@ -23,6 +22,24 @@ jobs:
           prepare: |
             pkg install -y python311 py311-pip gcc13 openblas
 
+      # ====================================================================
+      # <<<< مرحله جدید دیباگ: اینجا اضافه شده است >>>>
+      # این مرحله به ما نشان می‌دهد که پایتون دقیقاً کجا نصب شده است
+      - name: Debug - Find Python Path
+        run: |
+          echo "--- Searching for Python executable ---"
+          echo ""
+          echo "Listing contents of /usr/local/bin/ to see available binaries:"
+          ls -l /usr/local/bin/
+          echo ""
+          echo "--- Using 'which' to find the python executable path ---"
+          # ما از || true استفاده می‌کنیم تا اگر دستوری پیدا نشد، Workflow متوقف نشود
+          which python3.11 || true 
+          which python3 || true
+          which python || true
+          echo "--------------------------------------------------------"
+      # ====================================================================
+
       - name: Build and Package Wheels
         id: build_step
         run: |
@@ -32,16 +49,15 @@ jobs:
           echo "pyTelegramBotAPI" >> requirements.txt
           
           echo "--- Building wheels from source... This may take a while. ---"
-          # <<<< اینجا و دو خط بعدی تغییر کرده است >>>>
-          /usr/local/bin/python3.11 -m pip install wheel
-          /usr/local/bin/python3.11 -m pip wheel --wheel-dir=./wheels -r requirements.txt
+          # ما فعلاً از یک نام عمومی استفاده می‌کنیم به امید اینکه در PATH باشد
+          # اگر این هم کار نکرد، خروجی مرحله دیباگ به ما آدرس دقیق را خواهد داد
+          python3 -m pip install wheel
+          python3 -m pip wheel --wheel-dir=./wheels -r requirements.txt
           
           echo "--- Packaging wheels into a single zip file... ---"
           zip -r freebsd-wheels.zip wheels/
           
-          # ساخت یک تگ منحصر به فرد
           TAG_NAME="freebsd-wheels-$(date +'%Y%m%d-%H%M%S')"
-          echo "Generated tag name: ${TAG_NAME}"
           echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release and Upload Asset
@@ -50,7 +66,6 @@ jobs:
         run: |
           TAG="${{ steps.build_step.outputs.tag_name }}"
           
-          echo "--- Creating GitHub Release with tag ${TAG}... ---"
           gh release create "${TAG}" ./freebsd-wheels.zip \
             --title "FreeBSD Wheels - ${TAG}" \
             --notes "Wheels for Python 3.11 on FreeBSD, built automatically by GitHub Actions."
