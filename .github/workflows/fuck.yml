@@ -23,9 +23,9 @@ jobs:
           path: |
             ~/.cache/pip
             ./wheels
-          key: ${{ runner.os }}-pip-freebsd-${{ hashFiles('**/requirements.txt') }}
+          key: ${{ runner.os }}-pip-freebsd-v2-${{ hashFiles('**/requirements.txt') }} # v2 for new strategy
           restore-keys: |
-            ${{ runner.os }}-pip-freebsd-
+            ${{ runner.os }}-pip-freebsd-v2-
 
       - name: Start FreeBSD VM, Build, and Package
         uses: vmactions/freebsd-vm@v1
@@ -33,9 +33,11 @@ jobs:
         with:
           uses: 'local'
           mem: 6144
-          # <--- [اصلاح ۱] اضافه کردن copy_back برای برگرداندن فایل از VM
           copy_back: "freebsd-wheels.zip"
           run: |
+            # افزودن set -e باعث می‌شود اسکریپت با اولین خطا متوقف شود
+            set -e
+
             # نصب تمام وابستگی‌های سیستمی
             pkg install -y python311 py311-pip gcc13 openblas lapack zip pkgconf cmake git
             
@@ -49,51 +51,51 @@ jobs:
             # به‌روزرسانی ابزارهای ساخت پایتون
             python3.11 -m pip install --upgrade pip setuptools wheel
 
-            # بیلد پکیج‌های ساده‌تر
-            echo "--- Building hazm and pyTelegramBotAPI ---"
-            python3.11 -m pip wheel --verbose --wheel-dir=./wheels hazm pyTelegramBotAPI
+            # <--- [استراتژی جدید و اصولی برای بیلد] --->
             
-            # کلون و بیلد کردن scikit-learn از ریپازیتوری گیت
-            echo "--- Cloning and building scikit-learn from git repository ---"
+            echo "--- Creating wheels directory ---"
+            mkdir -p wheels
+
+            echo "--- Step 1: Building core scientific libraries (numpy, scipy) ---"
+            python3.11 -m pip wheel --verbose --wheel-dir=./wheels numpy scipy
+            
+            echo "--- Step 2: Building other scikit-learn dependencies ---"
+            python3.11 -m pip wheel --verbose --wheel-dir=./wheels joblib threadpoolctl
+
+            echo "--- Step 3: Cloning scikit-learn repository ---"
             SKLEARN_VERSION="1.5.0"
             git clone --depth 1 --branch ${SKLEARN_VERSION} https://github.com/scikit-learn/scikit-learn.git scikit-learn-repo
             
-            cd scikit-learn-repo
-            python3.11 -m pip wheel --verbose --wheel-dir=../wheels .
-            cd ..
+            echo "--- Step 4: Building scikit-learn from local clone ---"
+            # به pip می‌گوییم که وابستگی‌هایش را از پوشه wheels بخواند
+            python3.11 -m pip wheel --verbose --wheel-dir=./wheels --find-links=./wheels ./scikit-learn-repo
 
-            echo "--- All wheels built successfully! ---"
+            echo "--- Step 5: Building final user packages (hazm, pyTelegramBotAPI) ---"
+            # حالا pip برای ساخت hazm، از wheel آماده scikit-learn استفاده می‌کند
+            python3.11 -m pip wheel --verbose --wheel-dir=./wheels --find-links=./wheels hazm pyTelegramBotAPI
+            
+            # مرحله دیباگ برای اطمینان
+            echo "--- Final check: Listing contents of wheels directory ---"
+            ls -lR wheels
+            
             echo "--- Packaging all wheels into a single zip file... ---"
             zip -r freebsd-wheels.zip wheels/
             
             TAG_NAME="freebsd-wheels-$(date +'%Y%m%d-%H%M%S')"
             echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
-            
-            # <--- [اصلاح ۲] حذف دستور mv، چون copy_back فایل را از پوشه فعلی برمی‌دارد
-            # mv freebsd-wheels.zip /tmp/
 
       - name: Create GitHub Release and Upload Asset
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          set -e
           TAG="${{ steps.build_step.outputs.tag_name }}"
           
-          # <--- [اصلاح ۳] تغییر مسیر فایل زیپ به مسیر درست در Runner اصلی
+          if [ $(stat -c%s "freebsd-wheels.zip") -lt 1000000 ]; then # 1MB
+            echo "::error::Zip file is too small! Build likely failed. Check the logs."
+            exit 1
+          fi
+          
           gh release create "${TAG}" freebsd-wheels.zip \
             --title "FreeBSD Wheels - ${TAG}" \
             --notes "Wheels for Python 3.11 on FreeBSD. Includes scikit-learn, hazm, pyTelegramBotAPI."
-
-          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/freebsd-wheels.zip"
-          
-          echo "===================================================================="
-          echo "✅🎉 Workflow Complete! Your direct download link is ready: 🎉✅"
-          echo ""
-          echo "${DOWNLOAD_URL}"
-          echo ""
-          echo "===================================================================="
-          echo "Copy and run this command on your FreeBSD server:"
-          echo ""
-          echo "wget '${DOWNLOAD_URL}' -O wheels.zip && unzip -o wheels.zip"
-          echo "pip install --no-index --find-links=./wheels scikit-learn hazm pyTelegramBotAPI"
-          echo ""
-          echo "===================================================================="
