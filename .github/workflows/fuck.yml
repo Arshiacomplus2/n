@@ -23,9 +23,9 @@ jobs:
           path: |
             ~/.cache/pip
             ./wheels
-          key: ${{ runner.os }}-pip-freebsd-v2-${{ hashFiles('**/requirements.txt') }} # v2 for new strategy
+          key: ${{ runner.os }}-pip-freebsd-v3-${{ hashFiles('**/requirements.txt') }} # v3 for robustness
           restore-keys: |
-            ${{ runner.os }}-pip-freebsd-v2-
+            ${{ runner.os }}-pip-freebsd-v3-
 
       - name: Start FreeBSD VM, Build, and Package
         uses: vmactions/freebsd-vm@v1
@@ -35,7 +35,7 @@ jobs:
           mem: 6144
           copy_back: "freebsd-wheels.zip"
           run: |
-            # افزودن set -e باعث می‌شود اسکریپت با اولین خطا متوقف شود
+            # توقف اسکریپت با اولین خطا
             set -e
 
             # نصب تمام وابستگی‌های سیستمی
@@ -51,13 +51,13 @@ jobs:
             # به‌روزرسانی ابزارهای ساخت پایتون
             python3.11 -m pip install --upgrade pip setuptools wheel
 
-            # <--- [استراتژی جدید و اصولی برای بیلد] --->
-            
             echo "--- Creating wheels directory ---"
             mkdir -p wheels
 
-            echo "--- Step 1: Building core scientific libraries (numpy, scipy) ---"
-            python3.11 -m pip wheel --verbose --wheel-dir=./wheels numpy scipy
+            # <--- [اصلاح نهایی] محدود کردن پردازش موازی برای جلوگیری از خطای حافظه --->
+            
+            echo "--- Step 1: Building core scientific libraries (single-threaded) ---"
+            python3.11 -m pip wheel --verbose --wheel-dir=./wheels --config-settings="build-args=-j1" numpy scipy
             
             echo "--- Step 2: Building other scikit-learn dependencies ---"
             python3.11 -m pip wheel --verbose --wheel-dir=./wheels joblib threadpoolctl
@@ -66,15 +66,12 @@ jobs:
             SKLEARN_VERSION="1.5.0"
             git clone --depth 1 --branch ${SKLEARN_VERSION} https://github.com/scikit-learn/scikit-learn.git scikit-learn-repo
             
-            echo "--- Step 4: Building scikit-learn from local clone ---"
-            # به pip می‌گوییم که وابستگی‌هایش را از پوشه wheels بخواند
-            python3.11 -m pip wheel --verbose --wheel-dir=./wheels --find-links=./wheels ./scikit-learn-repo
+            echo "--- Step 4: Building scikit-learn from local clone (single-threaded) ---"
+            python3.11 -m pip wheel --verbose --wheel-dir=./wheels --find-links=./wheels --config-settings="build-args=-j1" ./scikit-learn-repo
 
-            echo "--- Step 5: Building final user packages (hazm, pyTelegramBotAPI) ---"
-            # حالا pip برای ساخت hazm، از wheel آماده scikit-learn استفاده می‌کند
+            echo "--- Step 5: Building final user packages ---"
             python3.11 -m pip wheel --verbose --wheel-dir=./wheels --find-links=./wheels hazm pyTelegramBotAPI
             
-            # مرحله دیباگ برای اطمینان
             echo "--- Final check: Listing contents of wheels directory ---"
             ls -lR wheels
             
