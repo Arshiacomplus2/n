@@ -1,0 +1,83 @@
+# نام Workflow شما
+name: Build and Release FreeBSD Wheels
+
+# این بخش مشخص می‌کند که Workflow چه زمانی اجرا شود
+on:
+  # این گزینه به شما اجازه می‌دهد که به صورت دستی از تب Actions آن را اجرا کنید
+  workflow_dispatch:
+
+# **مهم**: به این کار اجازه می‌دهیم تا بتواند یک Release در ریپازیتوری ایجاد کند
+permissions:
+  contents: write
+
+# تعریف کارهایی که باید انجام شود
+jobs:
+  build-and-release:
+    # این کار روی یک ماشین اوبونتو اجرا می‌شود
+    runs-on: ubuntu-latest
+    
+    steps:
+      # مرحله ۱: کد ریپازیتوری شما را دانلود می‌کند
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # مرحله ۲: یک ماشین مجازی FreeBSD را اجرا و ابزارها را نصب می‌کند
+      - name: Start FreeBSD VM and Install Dependencies
+        uses: vmactions/freebsd-vm@v1
+        with:
+          uses: 'local'
+          mem: 4096 # افزایش حافظه برای کامپایل بهتر
+          prepare: |
+            pkg install -y python311 py311-pip gfortran openblas
+
+      # مرحله ۳: ساخت فایل نیازمندی‌ها، کامپایل چرخ‌ها و فشرده‌سازی
+      - name: Build and Package Wheels
+        id: build_step # به این مرحله یک شناسه می‌دهیم تا بعداً از خروجی‌هایش استفاده کنیم
+        run: |
+          # ساخت فایل نیازمندی‌ها
+          echo "scikit-learn" > requirements.txt
+          echo "hazm" >> requirements.txt
+          echo "pyTelegramBotAPI" >> requirements.txt
+          
+          echo "--- Building wheels from source... This may take a while. ---"
+          python3.11 -m pip install wheel
+          python3.11 -m pip wheel --wheel-dir=./wheels -r requirements.txt
+          
+          echo "--- Packaging wheels into a single zip file... ---"
+          zip -r freebsd-wheels.zip wheels/
+          
+          # یک نام تگ منحصر به فرد بر اساس تاریخ و زمان می‌سازیم
+          TAG_NAME="freebsd-wheels-$(date +'%Y%m%d-%H%M%S')"
+          echo "Generated tag name: ${TAG_NAME}"
+          
+          # نام تگ را به عنوان خروجی این مرحله ثبت می‌کنیم
+          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+
+      # مرحله ۴: جادوی نهایی! ایجاد Release در گیت‌هاب و آپلود فایل
+      - name: Create GitHub Release and Upload Asset
+        env:
+          # توکن گیت‌هاب به صورت خودکار توسط Actions فراهم می‌شود
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # از نام تگی که در مرحله قبل ساختیم استفاده می‌کنیم
+          TAG="${{ steps.build_step.outputs.tag_name }}"
+          
+          echo "--- Creating GitHub Release with tag ${TAG}... ---"
+          gh release create "${TAG}" ./freebsd-wheels.zip \
+            --title "FreeBSD Wheels - ${TAG}" \
+            --notes "Wheels for Python 3.11 on FreeBSD, built automatically by GitHub Actions."
+
+          # ساخت لینک دانلود نهایی و چاپ آن در لاگ‌ها
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/freebsd-wheels.zip"
+          
+          echo "===================================================================="
+          echo "✅🎉 Workflow Complete! Your direct download link is ready: 🎉✅"
+          echo ""
+          echo "${DOWNLOAD_URL}"
+          echo ""
+          echo "===================================================================="
+          echo "Copy and run this command on your server:"
+          echo ""
+          echo "wget ${DOWNLOAD_URL} -O wheels.zip"
+          echo ""
+          echo "===================================================================="
