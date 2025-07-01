@@ -8,7 +8,9 @@ permissions:
 
 jobs:
   build-and-release:
-    timeout-minutes: 120
+    # <<<< اینجا تغییر کرده است >>>>
+    # افزایش زمان تایم‌اوت به حداکثر مقدار ممکن (6 ساعت)
+    timeout-minutes: 360
     runs-on: ubuntu-latest
     
     steps:
@@ -32,11 +34,9 @@ jobs:
           uses: 'local'
           mem: 6144
           run: |
-            # <<<< اینجا تغییر کرده است >>>>
             # نصب تمام وابستگی‌های سیستمی، شامل zip
             pkg install -y python311 py311-pip gcc13 openblas zip
             
-            # <<<< اینجا تغییر کرده است >>>>
             # تنظیم متغیرهای محیطی برای پیدا کردن کامپایلرها
             export FC=/usr/local/bin/gfortran13
             export CC=/usr/local/bin/gcc13
