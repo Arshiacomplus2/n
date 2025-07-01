@@ -8,64 +8,64 @@ permissions:
 
 jobs:
   build-and-release:
+    timeout-minutes: 120
     runs-on: ubuntu-latest
     
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # مرحله ۱: اضافه کردن کشینگ برای سرعت بخشیدن به اجراهای بعدی
       - name: Cache pip packages and wheels
         uses: actions/cache@v4
         with:
           path: |
             ~/.cache/pip
             ./wheels
-          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          key: ${{ runner.os }}-pip-freebsd-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
-            ${{ runner.os }}-pip-
+            ${{ runner.os }}-pip-freebsd-
 
-      # مرحله ۲: جادوی اصلی! اجرای FreeBSD و تمام دستورات داخل آن
       - name: Start FreeBSD VM, Build, and Package
         uses: vmactions/freebsd-vm@v1
         id: build_step
         with:
           uses: 'local'
-          mem: 6144 # افزایش حافظه برای کامپایل‌های سنگین
+          mem: 6144
           run: |
-            # نصب وابستگی‌های سیستمی
-            pkg install -y python311 py311-pip gcc13 openblas
+            # <<<< اینجا تغییر کرده است >>>>
+            # نصب تمام وابستگی‌های سیستمی، شامل zip
+            pkg install -y python311 py311-pip gcc13 openblas zip
+            
+            # <<<< اینجا تغییر کرده است >>>>
+            # تنظیم متغیرهای محیطی برای پیدا کردن کامپایلرها
+            export FC=/usr/local/bin/gfortran13
+            export CC=/usr/local/bin/gcc13
+            export CXX=/usr/local/bin/g++13
             
             # ساخت فایل نیازمندی‌ها
             echo "scikit-learn" > requirements.txt
             echo "hazm" >> requirements.txt
             echo "pyTelegramBotAPI" >> requirements.txt
             
-            echo "--- Building wheels from source inside FreeBSD VM... ---"
-            # استفاده از آدرس کامل و صحیح پایتون
-            /usr/local/bin/python3.11 -m pip install --upgrade pip wheel
+            # به‌روزرسانی ابزارهای ساخت
+            /usr/local/bin/python3.11 -m pip install --upgrade pip setuptools wheel
+
+            echo "--- Building all packages... This is the SLOW part and may take over an hour. ---"
             /usr/local/bin/python3.11 -m pip wheel --wheel-dir=./wheels -r requirements.txt
-            
-            echo "--- Packaging wheels into a single zip file... ---"
+
+            echo "--- Packaging all wheels into a single zip file... ---"
             zip -r freebsd-wheels.zip wheels/
             
-            # ساخت تگ منحصر به فرد و ثبت آن به عنوان خروجی
             TAG_NAME="freebsd-wheels-$(date +'%Y%m%d-%H%M%S')"
             echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
-            
-            # انتقال فایل زیپ به پوشه اشتراکی تا در مرحله بعد قابل دسترس باشد
             mv freebsd-wheels.zip /tmp/
 
-      # مرحله ۳: ایجاد Release و آپلود فایل ساخته شده
       - name: Create GitHub Release and Upload Asset
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # استفاده از تگی که داخل ماشین مجازی ساخته شد
           TAG="${{ steps.build_step.outputs.tag_name }}"
           
-          echo "--- Creating GitHub Release with tag ${TAG}... ---"
-          # فایل زیپ از پوشه اشتراکی /tmp برداشته می‌شود
           gh release create "${TAG}" /tmp/freebsd-wheels.zip \
             --title "FreeBSD Wheels - ${TAG}" \
             --notes "Wheels for Python 3.11 on FreeBSD, built automatically with caching."
