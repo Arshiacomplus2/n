@@ -23,9 +23,9 @@ jobs:
           path: |
             ~/.cache/pip
             ./wheels
-          key: ${{ runner.os }}-pip-freebsd-v3-${{ hashFiles('**/requirements.txt') }} # v3 for robustness
+          key: ${{ runner.os }}-pip-freebsd-v4-${{ hashFiles('**/requirements.txt') }} # v4 for correct build args
           restore-keys: |
-            ${{ runner.os }}-pip-freebsd-v3-
+            ${{ runner.os }}-pip-freebsd-v4-
 
       - name: Start FreeBSD VM, Build, and Package
         uses: vmactions/freebsd-vm@v1
@@ -39,7 +39,7 @@ jobs:
             set -e
 
             # نصب تمام وابستگی‌های سیستمی
-            pkg install -y python311 py311-pip gcc13 openblas lapack zip pkgconf cmake git
+            pkg install -y python311 py311-pip gcc13 openblas lapack zip pkgconf cmake git ninja
             
             # تنظیم تمام متغیرهای محیطی لازم
             export FC=/usr/local/bin/gfortran13
@@ -47,6 +47,9 @@ jobs:
             export CXX=/usr/local/bin/g++13
             export PKG_CONFIG_PATH=/usr/local/libdata/pkgconfig
             export PATH="/usr/local/bin:${PATH}"
+
+            # <--- [اصلاح نهایی] استفاده از متغیر محیطی NINJA_ARGS برای کنترل پردازش موازی --->
+            export NINJA_ARGS="-j1"
             
             # به‌روزرسانی ابزارهای ساخت پایتون
             python3.11 -m pip install --upgrade pip setuptools wheel
@@ -54,10 +57,8 @@ jobs:
             echo "--- Creating wheels directory ---"
             mkdir -p wheels
 
-            # <--- [اصلاح نهایی] محدود کردن پردازش موازی برای جلوگیری از خطای حافظه --->
-            
-            echo "--- Step 1: Building core scientific libraries (single-threaded) ---"
-            python3.11 -m pip wheel --verbose --wheel-dir=./wheels --config-settings="build-args=-j1" numpy scipy
+            echo "--- Step 1: Building core scientific libraries (single-threaded via NINJA_ARGS) ---"
+            python3.11 -m pip wheel --verbose --wheel-dir=./wheels numpy scipy
             
             echo "--- Step 2: Building other scikit-learn dependencies ---"
             python3.11 -m pip wheel --verbose --wheel-dir=./wheels joblib threadpoolctl
@@ -66,12 +67,13 @@ jobs:
             SKLEARN_VERSION="1.5.0"
             git clone --depth 1 --branch ${SKLEARN_VERSION} https://github.com/scikit-learn/scikit-learn.git scikit-learn-repo
             
-            echo "--- Step 4: Building scikit-learn from local clone (single-threaded) ---"
-            python3.11 -m pip wheel --verbose --wheel-dir=./wheels --find-links=./wheels --config-settings="build-args=-j1" ./scikit-learn-repo
+            echo "--- Step 4: Building scikit-learn from local clone (single-threaded via NINJA_ARGS) ---"
+            python3.11 -m pip wheel --verbose --wheel-dir=./wheels --find-links=./wheels ./scikit-learn-repo
 
             echo "--- Step 5: Building final user packages ---"
             python3.11 -m pip wheel --verbose --wheel-dir=./wheels --find-links=./wheels hazm pyTelegramBotAPI
             
+            # مرحله دیباگ برای اطمینان
             echo "--- Final check: Listing contents of wheels directory ---"
             ls -lR wheels
             
