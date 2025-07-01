@@ -1,36 +1,28 @@
 # نام Workflow شما
 name: Build and Release FreeBSD Wheels
 
-# این بخش مشخص می‌کند که Workflow چه زمانی اجرا شود
 on:
   workflow_dispatch:
 
-# اجازه دسترسی برای ایجاد Release
 permissions:
   contents: write
 
-# تعریف کارهایی که باید انجام شود
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
     
     steps:
-      # مرحله ۱: دانلود کد ریپازیتوری
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # مرحله ۲: اجرای ماشین مجازی FreeBSD و نصب ابزارها
       - name: Start FreeBSD VM and Install Dependencies
         uses: vmactions/freebsd-vm@v1
         with:
           uses: 'local'
           mem: 4096
           prepare: |
-            # نصب ابزارهای لازم داخل ماشین مجازی FreeBSD
-            # <<<< اینجا تغییر کرده است >>>>
             pkg install -y python311 py311-pip gcc13 openblas
 
-      # مرحله ۳: ساخت فایل نیازمندی‌ها، کامپایل چرخ‌ها و فشرده‌سازی
       - name: Build and Package Wheels
         id: build_step
         run: |
@@ -40,8 +32,9 @@ jobs:
           echo "pyTelegramBotAPI" >> requirements.txt
           
           echo "--- Building wheels from source... This may take a while. ---"
-          python3.11 -m pip install wheel
-          python3.11 -m pip wheel --wheel-dir=./wheels -r requirements.txt
+          # <<<< اینجا و دو خط بعدی تغییر کرده است >>>>
+          /usr/local/bin/python3.11 -m pip install wheel
+          /usr/local/bin/python3.11 -m pip wheel --wheel-dir=./wheels -r requirements.txt
           
           echo "--- Packaging wheels into a single zip file... ---"
           zip -r freebsd-wheels.zip wheels/
@@ -51,7 +44,6 @@ jobs:
           echo "Generated tag name: ${TAG_NAME}"
           echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
 
-      # مرحله ۴: ایجاد Release در گیت‌هاب و چاپ لینک دانلود
       - name: Create GitHub Release and Upload Asset
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
