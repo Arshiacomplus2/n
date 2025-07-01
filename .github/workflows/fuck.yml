@@ -32,15 +32,17 @@ jobs:
           uses: 'local'
           mem: 6144
           run: |
-            # <<<< آخرین تغییر اینجا >>>>
-            # نصب تمام وابستگی‌های سیستمی، شامل git
+            # نصب تمام وابستگی‌های سیستمی
             pkg install -y python311 py311-pip gcc13 openblas zip pkgconf cmake git
             
-            # تنظیم متغیرهای محیطی برای پیدا کردن کامپایلرها و کتابخانه‌ها
+            # <<<< آخرین و مهم‌ترین تغییر اینجاست >>>>
+            # تنظیم تمام متغیرهای محیطی لازم
             export FC=/usr/local/bin/gfortran13
             export CC=/usr/local/bin/gcc13
             export CXX=/usr/local/bin/g++13
             export PKG_CONFIG_PATH=/usr/local/libdata/pkgconfig
+            # به شل می‌گوییم که دستورات را در این آدرس هم پیدا کند
+            export PATH="/usr/local/bin:${PATH}"
             
             # ساخت فایل نیازمندی‌ها
             echo "scikit-learn" > requirements.txt
@@ -48,10 +50,10 @@ jobs:
             echo "pyTelegramBotAPI" >> requirements.txt
             
             # به‌روزرسانی ابزارهای ساخت پایتون
-            /usr/local/bin/python3.11 -m pip install --upgrade pip setuptools wheel
+            python3.11 -m pip install --upgrade pip setuptools wheel
 
-            echo "--- Building all packages... ---"
-            /usr/local/bin/python3.11 -m pip wheel --wheel-dir=./wheels -r requirements.txt
+            echo "--- Building all packages... This is the final attempt. ---"
+            python3.11 -m pip wheel --wheel-dir=./wheels -r requirements.txt
 
             echo "--- Packaging all wheels into a single zip file... ---"
             zip -r freebsd-wheels.zip wheels/
