@@ -1,3 +1,5 @@
+# نام فایل: .github/workflows/build-freebsd-wheels.yml
+
 name: Build, Cache, and Release FreeBSD Wheels
 
 on:
@@ -30,12 +32,12 @@ jobs:
         id: build_step
         with:
           uses: 'local'
-          mem: 6144
+          mem: 6144 # افزایش حافظه برای کامپایل‌های سنگین
           run: |
             # نصب تمام وابستگی‌های سیستمی
-            pkg install -y python311 py311-pip gcc13 openblas zip pkgconf cmake git
+            # <--- [اصلاح اصلی] اضافه کردن بسته lapack برای کامپایل scipy
+            pkg install -y python311 py311-pip gcc13 openblas lapack zip pkgconf cmake git
             
-            # <<<< آخرین و مهم‌ترین تغییر اینجاست >>>>
             # تنظیم تمام متغیرهای محیطی لازم
             export FC=/usr/local/bin/gfortran13
             export CC=/usr/local/bin/gcc13
@@ -53,11 +55,13 @@ jobs:
             python3.11 -m pip install --upgrade pip setuptools wheel
 
             echo "--- Building all packages... This is the final attempt. ---"
-            python3.11 -m pip wheel --wheel-dir=./wheels -r requirements.txt
+            # اضافه کردن فلگ --verbose برای دیدن لاگ‌های کامل‌تر در صورت بروز خطا
+            python3.11 -m pip wheel --verbose --wheel-dir=./wheels -r requirements.txt
 
             echo "--- Packaging all wheels into a single zip file... ---"
             zip -r freebsd-wheels.zip wheels/
             
+            # ساخت یک تگ منحصر به فرد برای این ریلیز
             TAG_NAME="freebsd-wheels-$(date +'%Y%m%d-%H%M%S')"
             echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
             mv freebsd-wheels.zip /tmp/
@@ -66,12 +70,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # گرفتن تگ از خروجی مرحله قبل
           TAG="${{ steps.build_step.outputs.tag_name }}"
           
+          # ساخت ریلیز در گیت‌هاب و آپلود فایل زیپ
           gh release create "${TAG}" /tmp/freebsd-wheels.zip \
             --title "FreeBSD Wheels - ${TAG}" \
-            --notes "Wheels for Python 3.11 on FreeBSD, built automatically with caching."
+            --notes "Wheels for Python 3.11 on FreeBSD, built automatically."
 
+          # ساخت و نمایش لینک دانلود مستقیم برای راحتی کاربر
           DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/freebsd-wheels.zip"
           
           echo "===================================================================="
@@ -80,8 +87,9 @@ jobs:
           echo "${DOWNLOAD_URL}"
           echo ""
           echo "===================================================================="
-          echo "Copy and run this command on your server:"
+          echo "Copy and run this command on your FreeBSD server:"
           echo ""
-          echo "wget '${DOWNLOAD_URL}' -O wheels.zip"
+          echo "wget '${DOWNLOAD_URL}' -O wheels.zip && unzip wheels.zip"
+          echo "pip install --no-index --find-links=./wheels -r requirements.txt"
           echo ""
           echo "===================================================================="
