@@ -32,10 +32,9 @@ jobs:
         id: build_step
         with:
           uses: 'local'
-          mem: 6144 # افزایش حافظه برای کامپایل‌های سنگین
+          mem: 6144
           run: |
             # نصب تمام وابستگی‌های سیستمی
-            # <--- [اصلاح اصلی] اضافه کردن بسته lapack برای کامپایل scipy
             pkg install -y python311 py311-pip gcc13 openblas lapack zip pkgconf cmake git
             
             # تنظیم تمام متغیرهای محیطی لازم
@@ -43,25 +42,34 @@ jobs:
             export CC=/usr/local/bin/gcc13
             export CXX=/usr/local/bin/g++13
             export PKG_CONFIG_PATH=/usr/local/libdata/pkgconfig
-            # به شل می‌گوییم که دستورات را در این آدرس هم پیدا کند
             export PATH="/usr/local/bin:${PATH}"
-            
-            # ساخت فایل نیازمندی‌ها
-            echo "scikit-learn" > requirements.txt
-            echo "hazm" >> requirements.txt
-            echo "pyTelegramBotAPI" >> requirements.txt
             
             # به‌روزرسانی ابزارهای ساخت پایتون
             python3.11 -m pip install --upgrade pip setuptools wheel
 
-            echo "--- Building all packages... This is the final attempt. ---"
-            # اضافه کردن فلگ --verbose برای دیدن لاگ‌های کامل‌تر در صورت بروز خطا
-            python3.11 -m pip wheel --verbose --wheel-dir=./wheels -r requirements.txt
+            # <--- [اصلاح اصلی] تغییر استراتژی بیلد برای scikit-learn --->
+
+            # ابتدا پکیج‌هایی که مشکل خاصی ندارند را بیلد می‌کنیم
+            echo "--- Building hazm and pyTelegramBotAPI ---"
+            python3.11 -m pip wheel --verbose --wheel-dir=./wheels hazm pyTelegramBotAPI
+            
+            # حالا scikit-learn را با روش git clone بیلد می‌کنیم تا مشکل نسخه یابی حل شود
+            echo "--- Cloning and building scikit-learn from git repository ---"
+            # به یک نسخه مشخص پین می‌کنیم تا بیلد تکرارپذیر باشد (مثلاً 1.5.0)
+            SKLEARN_VERSION="1.5.0"
+            git clone --depth 1 --branch ${SKLEARN_VERSION} https://github.com/scikit-learn/scikit-learn.git scikit-learn-repo
+            
+            # وارد پوشه کلون شده می‌شویم و از آنجا بیلد می‌کنیم
+            cd scikit-learn-repo
+            # نقطه (.) به pip می‌گوید که از پوشه فعلی بیلد کن
+            python3.11 -m pip wheel --verbose --wheel-dir=../wheels .
+            cd .. # بازگشت به پوشه اصلی
+
+            echo "--- All wheels built successfully! ---"
 
             echo "--- Packaging all wheels into a single zip file... ---"
             zip -r freebsd-wheels.zip wheels/
             
-            # ساخت یک تگ منحصر به فرد برای این ریلیز
             TAG_NAME="freebsd-wheels-$(date +'%Y%m%d-%H%M%S')"
             echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
             mv freebsd-wheels.zip /tmp/
@@ -70,15 +78,12 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # گرفتن تگ از خروجی مرحله قبل
           TAG="${{ steps.build_step.outputs.tag_name }}"
           
-          # ساخت ریلیز در گیت‌هاب و آپلود فایل زیپ
           gh release create "${TAG}" /tmp/freebsd-wheels.zip \
             --title "FreeBSD Wheels - ${TAG}" \
-            --notes "Wheels for Python 3.11 on FreeBSD, built automatically."
+            --notes "Wheels for Python 3.11 on FreeBSD. Includes scikit-learn, hazm, pyTelegramBotAPI."
 
-          # ساخت و نمایش لینک دانلود مستقیم برای راحتی کاربر
           DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/freebsd-wheels.zip"
           
           echo "===================================================================="
@@ -89,7 +94,7 @@ jobs:
           echo "===================================================================="
           echo "Copy and run this command on your FreeBSD server:"
           echo ""
-          echo "wget '${DOWNLOAD_URL}' -O wheels.zip && unzip wheels.zip"
-          echo "pip install --no-index --find-links=./wheels -r requirements.txt"
+          echo "wget '${DOWNLOAD_URL}' -O wheels.zip && unzip -o wheels.zip"
+          echo "pip install --no-index --find-links=./wheels scikit-learn hazm pyTelegramBotAPI"
           echo ""
           echo "===================================================================="
