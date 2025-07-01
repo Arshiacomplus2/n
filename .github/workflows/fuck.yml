@@ -1,4 +1,4 @@
-name: Build and Release FreeBSD Wheels
+name: Build, Cache, and Release FreeBSD Wheels
 
 on:
   workflow_dispatch:
@@ -14,61 +14,61 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Start FreeBSD VM and Install Dependencies
+      # مرحله ۱: اضافه کردن کشینگ برای سرعت بخشیدن به اجراهای بعدی
+      - name: Cache pip packages and wheels
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/pip
+            ./wheels
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # مرحله ۲: جادوی اصلی! اجرای FreeBSD و تمام دستورات داخل آن
+      - name: Start FreeBSD VM, Build, and Package
         uses: vmactions/freebsd-vm@v1
+        id: build_step
         with:
           uses: 'local'
-          mem: 4096
-          prepare: |
+          mem: 6144 # افزایش حافظه برای کامپایل‌های سنگین
+          run: |
+            # نصب وابستگی‌های سیستمی
             pkg install -y python311 py311-pip gcc13 openblas
+            
+            # ساخت فایل نیازمندی‌ها
+            echo "scikit-learn" > requirements.txt
+            echo "hazm" >> requirements.txt
+            echo "pyTelegramBotAPI" >> requirements.txt
+            
+            echo "--- Building wheels from source inside FreeBSD VM... ---"
+            # استفاده از آدرس کامل و صحیح پایتون
+            /usr/local/bin/python3.11 -m pip install --upgrade pip wheel
+            /usr/local/bin/python3.11 -m pip wheel --wheel-dir=./wheels -r requirements.txt
+            
+            echo "--- Packaging wheels into a single zip file... ---"
+            zip -r freebsd-wheels.zip wheels/
+            
+            # ساخت تگ منحصر به فرد و ثبت آن به عنوان خروجی
+            TAG_NAME="freebsd-wheels-$(date +'%Y%m%d-%H%M%S')"
+            echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+            
+            # انتقال فایل زیپ به پوشه اشتراکی تا در مرحله بعد قابل دسترس باشد
+            mv freebsd-wheels.zip /tmp/
 
-      # ====================================================================
-      # <<<< مرحله جدید دیباگ: اینجا اضافه شده است >>>>
-      # این مرحله به ما نشان می‌دهد که پایتون دقیقاً کجا نصب شده است
-      - name: Debug - Find Python Path
-        run: |
-          echo "--- Searching for Python executable ---"
-          echo ""
-          echo "Listing contents of /usr/local/bin/ to see available binaries:"
-          ls -l /usr/local/bin/
-          echo ""
-          echo "--- Using 'which' to find the python executable path ---"
-          # ما از || true استفاده می‌کنیم تا اگر دستوری پیدا نشد، Workflow متوقف نشود
-          which python3.11 || true 
-          which python3 || true
-          which python || true
-          echo "--------------------------------------------------------"
-      # ====================================================================
-
-      - name: Build and Package Wheels
-        id: build_step
-        run: |
-          # ساخت فایل نیازمندی‌ها
-          echo "scikit-learn" > requirements.txt
-          echo "hazm" >> requirements.txt
-          echo "pyTelegramBotAPI" >> requirements.txt
-          
-          echo "--- Building wheels from source... This may take a while. ---"
-          # ما فعلاً از یک نام عمومی استفاده می‌کنیم به امید اینکه در PATH باشد
-          # اگر این هم کار نکرد، خروجی مرحله دیباگ به ما آدرس دقیق را خواهد داد
-          python3 -m pip install wheel
-          python3 -m pip wheel --wheel-dir=./wheels -r requirements.txt
-          
-          echo "--- Packaging wheels into a single zip file... ---"
-          zip -r freebsd-wheels.zip wheels/
-          
-          TAG_NAME="freebsd-wheels-$(date +'%Y%m%d-%H%M%S')"
-          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
-
+      # مرحله ۳: ایجاد Release و آپلود فایل ساخته شده
       - name: Create GitHub Release and Upload Asset
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          # استفاده از تگی که داخل ماشین مجازی ساخته شد
           TAG="${{ steps.build_step.outputs.tag_name }}"
           
-          gh release create "${TAG}" ./freebsd-wheels.zip \
+          echo "--- Creating GitHub Release with tag ${TAG}... ---"
+          # فایل زیپ از پوشه اشتراکی /tmp برداشته می‌شود
+          gh release create "${TAG}" /tmp/freebsd-wheels.zip \
             --title "FreeBSD Wheels - ${TAG}" \
-            --notes "Wheels for Python 3.11 on FreeBSD, built automatically by GitHub Actions."
+            --notes "Wheels for Python 3.11 on FreeBSD, built automatically with caching."
 
           DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/freebsd-wheels.zip"
           
@@ -80,6 +80,6 @@ jobs:
           echo "===================================================================="
           echo "Copy and run this command on your server:"
           echo ""
-          echo "wget ${DOWNLOAD_URL} -O wheels.zip"
+          echo "wget '${DOWNLOAD_URL}' -O wheels.zip"
           echo ""
           echo "===================================================================="
