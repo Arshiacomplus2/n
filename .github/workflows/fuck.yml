@@ -23,55 +23,53 @@ jobs:
           path: |
             ~/.cache/pip
             ./wheels
-          # اضافه کردن یک پیشوند به کلید کش تا از کش‌های قبلی و خراب استفاده نشود
-          key: ${{ runner.os }}-pip-freebsd-v3-${{ hashFiles('**/requirements.txt') }}
+          key: ${{ runner.os }}-pip-freebsd-v4-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
-            ${{ runner.os }}-pip-freebsd-v3-
+            ${{ runner.os }}-pip-freebsd-v4-
 
       - name: Start FreeBSD VM, Build, and Package
         uses: vmactions/freebsd-vm@v1
         id: build_step
         with:
           uses: 'local'
-          mem: 8192 # افزایش حافظه برای کامپایل‌های سنگین مثل scikit-learn
+          mem: 8192
           run: |
-            # توقف اسکریپت در صورت بروز اولین خطا برای دیباگ راحت‌تر
+            # توقف اسکریپت در صورت بروز اولین خطا
             set -e
 
             # --- ۱. نصب وابستگی‌های سیستمی ---
-            # [اصلاح کلیدی]: نصب بسته 'python3' لینک‌های عمومی مثل /usr/local/bin/python3 را می‌سازد
-            # و خطای "status 127" (command not found) را به طور کامل حل می‌کند.
-            pkg install -y python311 py311-pip python3 gcc13 openblas lapack zip pkgconf cmake git
+            pkg install -y python311 py311-pip gcc13 openblas lapack zip pkgconf cmake git
 
-            # --- ۲. تنظیم متغیرهای محیطی ---
-            # این متغیرها به سیستم ساخت کمک می‌کنند تا کامپایلرها را پیدا کند
+            # --- ۲. [اصلاح نهایی و کلیدی] ایجاد لینک نمادین برای 'python' ---
+            # اسکریپت‌های ساخت scikit-learn به دنبال دستور 'python' می‌گردند، نه 'python3'.
+            # این دستور به صورت دستی یک لینک از /usr/local/bin/python به /usr/local/bin/python3.11 ایجاد می‌کند
+            # و خطای "status 127" (command not found) را به طور قطعی حل می‌کند.
+            ln -s /usr/local/bin/python3.11 /usr/local/bin/python
+            
+            # --- ۳. تنظیم متغیرهای محیطی ---
             export FC=/usr/local/bin/gfortran13
             export CC=/usr/local/bin/gcc13
             export CXX=/usr/local/bin/g++13
             export PKG_CONFIG_PATH=/usr/local/libdata/pkgconfig
             export PATH="/usr/local/bin:${PATH}"
             
-            # --- ۳. آماده‌سازی نیازمندی‌های پایتون ---
-            # ساخت فایل نیازمندی‌ها. پین کردن نسخه‌ها برای پایداری بیشتر به شدت توصیه می‌شود.
-            # pip خودش وابستگی‌ها (مثل numpy, scipy) را مدیریت می‌کند.
+            # --- ۴. آماده‌سازی نیازمندی‌های پایتون ---
             echo "scikit-learn==1.5.0" > requirements.txt
             echo "hazm" >> requirements.txt
             echo "pyTelegramBotAPI" >> requirements.txt
             
-            # به‌روزرسانی ابزارهای اصلی ساخت پایتون
+            # به‌روزرسانی ابزارهای ساخت با استفاده از مفسر دقیق
             python3.11 -m pip install --upgrade pip setuptools wheel
 
-            # --- ۴. ساخت Wheel ها ---
-            # تمام پکیج‌ها را در یک مرحله و به شکل استاندارد می‌سازیم.
-            # pip به طور خودکار ترتیب وابستگی‌ها را مدیریت می‌کند. این روش بسیار قابل اعتمادتر است.
+            # --- ۵. ساخت Wheel ها ---
+            # حالا که 'python' در دسترس است، pip می‌تواند تمام وابستگی‌ها را به درستی بسازد.
             echo "--- Building all package wheels from requirements.txt ---"
             python3.11 -m pip wheel --verbose --wheel-dir=./wheels -r requirements.txt
 
-            # --- ۵. بسته‌بندی و خروجی ---
+            # --- ۶. بسته‌بندی و خروجی ---
             echo "--- Packaging all wheels into a single zip file... ---"
             zip -r freebsd-wheels.zip wheels/
             
-            # ساخت یک تگ منحصر به فرد برای این ریلیز در گیت‌هاب
             TAG_NAME="freebsd-wheels-$(date +'%Y%m%d-%H%M%S')"
             echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
             mv freebsd-wheels.zip /tmp/
@@ -97,8 +95,7 @@ jobs:
           echo "Copy and run these commands on your FreeBSD server:"
           echo ""
           echo "wget '${DOWNLOAD_URL}' -O wheels.zip && unzip -o wheels.zip"
-          echo "# Make sure a corresponding requirements.txt file exists on your server:"
-          echo "# Example: echo 'scikit-learn==1.5.0' > requirements.txt; echo 'hazm' >> requirements.txt; ..."
+          echo "# Make sure a corresponding requirements.txt file exists on your server"
           echo "pip install --no-index --find-links=./wheels -r requirements.txt"
           echo ""
           echo "===================================================================="
