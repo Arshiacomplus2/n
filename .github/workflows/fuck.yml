@@ -23,59 +23,57 @@ jobs:
           path: |
             ~/.cache/pip
             ./wheels
-          key: ${{ runner.os }}-pip-freebsd-v2-${{ hashFiles('**/requirements.txt') }} # v2 in key to reset cache
+          key: ${{ runner.os }}-pip-freebsd-v3-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
-            ${{ runner.os }}-pip-freebsd-v2-
+            ${{ runner.os }}-pip-freebsd-v3-
 
       - name: Start FreeBSD VM, Build, and Package
         uses: vmactions/freebsd-vm@v1
         id: build_step
         with:
           uses: 'local'
-          mem: 8192 # افزایش حافظه به 8 گیگ برای اطمینان
+          mem: 8192 # 8GB RAM
           run: |
             # توقف اسکریپت در صورت بروز اولین خطا
             set -e
 
-            # ۱. نصب تمام وابستگی‌های سیستمی
+            # ۱. نصب تمام وابستگی‌های سیستمی لازم
             pkg install -y python311 py311-pip gcc13 openblas lapack zip pkgconf cmake git ninja
             
-            # ۲. ساخت سیم‌لینک برای python3 (بسیار مهم برای اسکریپت‌های ساخت)
+            # ۲. ساخت سیم‌لینک برای اینکه دستور 'python3' در دسترس باشد (بسیار مهم)
             ln -s /usr/local/bin/python3.11 /usr/local/bin/python3
 
-            # ۳. تنظیم متغیرهای محیطی
+            # ۳. تنظیم متغیرهای محیطی برای کامپایلرها
             export FC=/usr/local/bin/gfortran13
             export CC=/usr/local/bin/gcc13
             export CXX=/usr/local/bin/g++13
             export PKG_CONFIG_PATH=/usr/local/libdata/pkgconfig
             export PATH="/usr/local/bin:${PATH}"
             
-            # ۴. کنترل پردازش موازی برای جلوگیری از خطای حافظه
+            # ۴. محدود کردن پردازش موازی برای جلوگیری از خطای حافظه
             export NINJA_ARGS="-j1"
 
-            # ۵. به‌روزرسانی ابزارهای پایه پایتون
+            # ۵. به‌روزرسانی ابزارهای پایه و نصب وابستگی‌های ساخت در محیط اصلی
             python3.11 -m pip install --upgrade pip setuptools wheel
+            echo "--- Installing build dependencies (meson, ninja, cython) ---"
+            python3.11 -m pip install meson-python ninja "cython>=3.0.0"
 
             # --- شروع فرآیند ساخت مرحله به مرحله ---
 
-            echo "--- مرحله ۱: ساخت وابستگی‌های اصلی (numpy, scipy) ---"
-            # ابتدا numpy و scipy را به تنهایی می‌سازیم
+            echo "--- مرحله ۱: ساخت وابستگی‌های علمی اصلی (numpy, scipy) ---"
             python3.11 -m pip wheel --verbose --wheel-dir=./wheels numpy scipy
 
-            echo "--- مرحله ۲: ساخت scikit-learn با استفاده از وابستگی‌های ساخته شده ---"
-            # حالا scikit-learn را با --no-build-isolation می‌سازیم
-            # این فلگ به pip می‌گوید که از numpy/scipy که از قبل نصب شده استفاده کند
-            # و دوباره آن‌ها را در یک محیط ایزوله نسازد.
+            echo "--- مرحله ۲: ساخت scikit-learn با استفاده از وابستگی‌های موجود ---"
             python3.11 -m pip wheel --verbose --wheel-dir=./wheels \
               --no-build-isolation \
               --find-links=./wheels \
               scikit-learn==1.5.0
 
-            echo "--- مرحله ۳: ساخت بسته‌های باقی‌مانده ---"
+            echo "--- مرحله ۳: ساخت بسته‌های باقی‌مانده (hazm, pyTelegramBotAPI) ---"
             python3.11 -m pip wheel --verbose --wheel-dir=./wheels \
               --find-links=./wheels \
               hazm pyTelegramBotAPI
-
+            
             # --- پایان فرآیند ساخت ---
             
             echo "--- بررسی نهایی: لیست فایل‌های wheel ساخته شده ---"
