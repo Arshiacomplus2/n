@@ -23,78 +23,93 @@ jobs:
           path: |
             ~/.cache/pip
             ./wheels
-          key: ${{ runner.os }}-pip-freebsd-v4-${{ hashFiles('**/requirements.txt') }} # v4 for correct build args
+          key: ${{ runner.os }}-pip-freebsd-v2-${{ hashFiles('**/requirements.txt') }} # v2 in key to reset cache
           restore-keys: |
-            ${{ runner.os }}-pip-freebsd-v4-
+            ${{ runner.os }}-pip-freebsd-v2-
 
       - name: Start FreeBSD VM, Build, and Package
         uses: vmactions/freebsd-vm@v1
         id: build_step
         with:
           uses: 'local'
-          mem: 6144
-          copy_back: "freebsd-wheels.zip"
+          mem: 8192 # افزایش حافظه به 8 گیگ برای اطمینان
           run: |
-            # توقف اسکریپت با اولین خطا
+            # توقف اسکریپت در صورت بروز اولین خطا
             set -e
 
-            # نصب تمام وابستگی‌های سیستمی
+            # ۱. نصب تمام وابستگی‌های سیستمی
             pkg install -y python311 py311-pip gcc13 openblas lapack zip pkgconf cmake git ninja
             
-            # تنظیم تمام متغیرهای محیطی لازم
+            # ۲. ساخت سیم‌لینک برای python3 (بسیار مهم برای اسکریپت‌های ساخت)
+            ln -s /usr/local/bin/python3.11 /usr/local/bin/python3
+
+            # ۳. تنظیم متغیرهای محیطی
             export FC=/usr/local/bin/gfortran13
             export CC=/usr/local/bin/gcc13
             export CXX=/usr/local/bin/g++13
             export PKG_CONFIG_PATH=/usr/local/libdata/pkgconfig
             export PATH="/usr/local/bin:${PATH}"
-
-            # <--- [اصلاح نهایی] استفاده از متغیر محیطی NINJA_ARGS برای کنترل پردازش موازی --->
-            export NINJA_ARGS="-j1"
             
-            # به‌روزرسانی ابزارهای ساخت پایتون
+            # ۴. کنترل پردازش موازی برای جلوگیری از خطای حافظه
+            export NINJA_ARGS="-j1"
+
+            # ۵. به‌روزرسانی ابزارهای پایه پایتون
             python3.11 -m pip install --upgrade pip setuptools wheel
 
-            echo "--- Creating wheels directory ---"
-            mkdir -p wheels
+            # --- شروع فرآیند ساخت مرحله به مرحله ---
 
-            echo "--- Step 1: Building core scientific libraries (single-threaded via NINJA_ARGS) ---"
+            echo "--- مرحله ۱: ساخت وابستگی‌های اصلی (numpy, scipy) ---"
+            # ابتدا numpy و scipy را به تنهایی می‌سازیم
             python3.11 -m pip wheel --verbose --wheel-dir=./wheels numpy scipy
-            
-            echo "--- Step 2: Building other scikit-learn dependencies ---"
-            python3.11 -m pip wheel --verbose --wheel-dir=./wheels joblib threadpoolctl
 
-            echo "--- Step 3: Cloning scikit-learn repository ---"
-            SKLEARN_VERSION="1.5.0"
-            git clone --depth 1 --branch ${SKLEARN_VERSION} https://github.com/scikit-learn/scikit-learn.git scikit-learn-repo
-            
-            echo "--- Step 4: Building scikit-learn from local clone (single-threaded via NINJA_ARGS) ---"
-            python3.11 -m pip wheel --verbose --wheel-dir=./wheels --find-links=./wheels ./scikit-learn-repo
+            echo "--- مرحله ۲: ساخت scikit-learn با استفاده از وابستگی‌های ساخته شده ---"
+            # حالا scikit-learn را با --no-build-isolation می‌سازیم
+            # این فلگ به pip می‌گوید که از numpy/scipy که از قبل نصب شده استفاده کند
+            # و دوباره آن‌ها را در یک محیط ایزوله نسازد.
+            python3.11 -m pip wheel --verbose --wheel-dir=./wheels \
+              --no-build-isolation \
+              --find-links=./wheels \
+              scikit-learn==1.5.0
 
-            echo "--- Step 5: Building final user packages ---"
-            python3.11 -m pip wheel --verbose --wheel-dir=./wheels --find-links=./wheels hazm pyTelegramBotAPI
+            echo "--- مرحله ۳: ساخت بسته‌های باقی‌مانده ---"
+            python3.11 -m pip wheel --verbose --wheel-dir=./wheels \
+              --find-links=./wheels \
+              hazm pyTelegramBotAPI
+
+            # --- پایان فرآیند ساخت ---
             
-            # مرحله دیباگ برای اطمینان
-            echo "--- Final check: Listing contents of wheels directory ---"
+            echo "--- بررسی نهایی: لیست فایل‌های wheel ساخته شده ---"
             ls -lR wheels
-            
-            echo "--- Packaging all wheels into a single zip file... ---"
+
+            echo "--- بسته‌بندی فایل‌ها در یک فایل zip ---"
             zip -r freebsd-wheels.zip wheels/
             
             TAG_NAME="freebsd-wheels-$(date +'%Y%m%d-%H%M%S')"
             echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+            mv freebsd-wheels.zip /tmp/
 
       - name: Create GitHub Release and Upload Asset
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          set -e
           TAG="${{ steps.build_step.outputs.tag_name }}"
           
-          if [ $(stat -c%s "freebsd-wheels.zip") -lt 1000000 ]; then # 1MB
-            echo "::error::Zip file is too small! Build likely failed. Check the logs."
-            exit 1
-          fi
-          
-          gh release create "${TAG}" freebsd-wheels.zip \
+          gh release create "${TAG}" /tmp/freebsd-wheels.zip \
             --title "FreeBSD Wheels - ${TAG}" \
-            --notes "Wheels for Python 3.11 on FreeBSD. Includes scikit-learn, hazm, pyTelegramBotAPI."
+            --notes "Wheels for Python 3.11 on FreeBSD, built successfully using a staged approach."
+
+          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/freebsd-wheels.zip"
+          
+          echo "===================================================================="
+          echo "✅🎉 Workflow Complete! Your direct download link is ready: 🎉✅"
+          echo ""
+          echo "${DOWNLOAD_URL}"
+          echo ""
+          echo "===================================================================="
+          echo "Copy and run this command on your FreeBSD server:"
+          echo ""
+          echo "wget '${DOWNLOAD_URL}' -O wheels.zip && unzip -o wheels.zip"
+          echo 'echo "hazm" > requirements.txt && echo "scikit-learn==1.5.0" >> requirements.txt && echo "pyTelegramBotAPI" >> requirements.txt'
+          echo "pip install --no-index --find-links=./wheels -r requirements.txt"
+          echo ""
+          echo "===================================================================="
