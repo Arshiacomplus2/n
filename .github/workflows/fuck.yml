@@ -38,13 +38,11 @@ jobs:
             set -e
 
             # نصب تمام وابستگی‌های سیستمی ضروری
-            pkg install -y python311 py311-pip gcc13 openblas lapack zip pkgconf cmake git ninja
+            # <--- [اصلاح کلیدی] اضافه کردن بسته 'python3'
+            # این بسته لینک‌های استاندارد /usr/local/bin/python3 و /usr/local/bin/pip را ایجاد می‌کند
+            # و مشکل خطای "command not found" (status 127) را به شکل صحیح حل می‌کند.
+            pkg install -y python311 py311-pip python3 gcc13 openblas lapack zip pkgconf cmake git ninja
             
-            # --- [مهم‌ترین اصلاح] ---
-            # ساخت لینک نمادین برای حل مشکل "command not found" (status 127)
-            # که در اسکریپت‌های داخلی scikit-learn رخ می‌دهد.
-            ln -s /usr/local/bin/python3.11 /usr/local/bin/python
-
             # تنظیم تمام متغیرهای محیطی لازم
             export FC=/usr/local/bin/gfortran13
             export CC=/usr/local/bin/gcc13
@@ -52,17 +50,16 @@ jobs:
             export PKG_CONFIG_PATH=/usr/local/libdata/pkgconfig
             export PATH="/usr/local/bin:${PATH}"
             
-            # ساخت فایل نیازمندی‌ها
-            echo "scikit-learn" > requirements.txt
+            # ساخت فایل نیازمندی‌ها (توصیه: نسخه‌ها را برای پایداری بیشتر مشخص کنید)
+            echo "scikit-learn==1.5.0" > requirements.txt
             echo "hazm" >> requirements.txt
             echo "pyTelegramBotAPI" >> requirements.txt
             
-            # --- [اصلاح طبق درخواست شما] ---
-            # استفاده صریح از python3.11 در تمام دستورات
-            # به‌روزرسانی ابزارهای ساخت پایتون
+            # به‌روزرسانی ابزارهای ساخت پایتون با استفاده از مفسر دقیق
             python3.11 -m pip install --upgrade pip setuptools wheel
 
             echo "--- Building all packages from requirements.txt ---"
+            # استفاده از مفسر دقیق برای اجرای pip
             python3.11 -m pip wheel --verbose --wheel-dir=./wheels -r requirements.txt
 
             echo "--- Packaging all wheels into a single zip file... ---"
@@ -91,9 +88,10 @@ jobs:
           echo "${DOWNLOAD_URL}"
           echo ""
           echo "===================================================================="
-          echo "Copy and run this command on your FreeBSD server:"
+          echo "Copy and run these commands on your FreeBSD server:"
           echo ""
           echo "wget '${DOWNLOAD_URL}' -O wheels.zip && unzip -o wheels.zip"
-          echo "pip install --no-index --find-links=./wheels scikit-learn hazm pyTelegramBotAPI"
+          echo "# Create a requirements.txt file on your server first"
+          echo "pip install --no-index --find-links=./wheels -r requirements.txt"
           echo ""
           echo "===================================================================="
