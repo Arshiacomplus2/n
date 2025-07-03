@@ -23,6 +23,7 @@ jobs:
           path: |
             ~/.cache/pip
             ./wheels
+          # کلید کش را طبق درخواست شما تغییر نمی‌دهیم تا از بیلد موفق قبلی استفاده شود
           key: ${{ runner.os }}-pip-freebsd-v4-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-freebsd-v4-
@@ -37,42 +38,40 @@ jobs:
             # توقف اسکریپت در صورت بروز اولین خطا
             set -e
 
-            # --- ۱. نصب وابستگی‌های سیستمی ---
+            # نصب تمام وابستگی‌های سیستمی
             pkg install -y python311 py311-pip gcc13 openblas lapack zip pkgconf cmake git
 
-            # --- ۲. [اصلاح نهایی و کلیدی] ایجاد لینک نمادین برای 'python' ---
-            # اسکریپت‌های ساخت scikit-learn به دنبال دستور 'python' می‌گردند، نه 'python3'.
-            # این دستور به صورت دستی یک لینک از /usr/local/bin/python به /usr/local/bin/python3.11 ایجاد می‌کند
-            # و خطای "status 127" (command not found) را به طور قطعی حل می‌کند.
+            # ایجاد لینک نمادین برای 'python'
             ln -s /usr/local/bin/python3.11 /usr/local/bin/python
             
-            # --- ۳. تنظیم متغیرهای محیطی ---
+            # تنظیم متغیرهای محیطی
             export FC=/usr/local/bin/gfortran13
             export CC=/usr/local/bin/gcc13
             export CXX=/usr/local/bin/g++13
             export PKG_CONFIG_PATH=/usr/local/libdata/pkgconfig
             export PATH="/usr/local/bin:${PATH}"
             
-            # --- ۴. آماده‌سازی نیازمندی‌های پایتون ---
+            # آماده‌سازی نیازمندی‌های پایتون
             echo "scikit-learn==1.5.0" > requirements.txt
             echo "hazm" >> requirements.txt
             echo "pyTelegramBotAPI" >> requirements.txt
             
-            # به‌روزرسانی ابزارهای ساخت با استفاده از مفسر دقیق
+            # به‌روزرسانی ابزارهای ساخت
             python3.11 -m pip install --upgrade pip setuptools wheel
 
-            # --- ۵. ساخت Wheel ها ---
-            # حالا که 'python' در دسترس است، pip می‌تواند تمام وابستگی‌ها را به درستی بسازد.
+            # ساخت Wheel ها
             echo "--- Building all package wheels from requirements.txt ---"
             python3.11 -m pip wheel --verbose --wheel-dir=./wheels -r requirements.txt
 
-            # --- ۶. بسته‌بندی و خروجی ---
+            # بسته‌بندی فایل‌ها
             echo "--- Packaging all wheels into a single zip file... ---"
             zip -r freebsd-wheels.zip wheels/
             
+            # ساخت تگ برای ریلیز
             TAG_NAME="freebsd-wheels-$(date +'%Y%m%d-%H%M%S')"
             echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
-            mv freebsd-wheels.zip /tmp/
+            
+            # <--- [اصلاح کلیدی ۱] دستور mv حذف شد. فایل زیپ در پوشه کاری باقی می‌ماند.
 
       - name: Create GitHub Release and Upload Asset
         env:
@@ -80,7 +79,8 @@ jobs:
         run: |
           TAG="${{ steps.build_step.outputs.tag_name }}"
           
-          gh release create "${TAG}" /tmp/freebsd-wheels.zip \
+          # <--- [اصلاح کلیدی ۲] مسیر فایل به صورت نسبی و بدون /tmp/ استفاده می‌شود.
+          gh release create "${TAG}" freebsd-wheels.zip \
             --title "FreeBSD Wheels - ${TAG}" \
             --notes "Wheels for Python 3.11 on FreeBSD, built automatically."
 
