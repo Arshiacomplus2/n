@@ -23,7 +23,7 @@ jobs:
           path: |
             ~/.cache/pip
             ./wheels
-          # از همان کش قبلی استفاده می‌کنیم چون زیرساخت درست است
+          # از همان کش قبلی استفاده می‌کنیم
           key: ${{ runner.os }}-pip-freebsd-v4-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-freebsd-v4-
@@ -40,6 +40,8 @@ jobs:
 
             # --- ۱. نصب و آماده‌سازی زیرساخت ---
             pkg install -y python311 py311-pip gcc13 openblas lapack zip pkgconf cmake git
+
+            # ایجاد لینک نمادین برای 'python' جهت سازگاری با اسکریپت‌های ساخت
             ln -s /usr/local/bin/python3.11 /usr/local/bin/python
             
             # --- ۲. تنظیم متغیرهای محیطی ---
@@ -49,26 +51,35 @@ jobs:
             export PKG_CONFIG_PATH=/usr/local/libdata/pkgconfig
             export PATH="/usr/local/bin:${PATH}"
             
-            # --- ۳. آماده‌سازی نیازمندی‌های پایتون ---
-            # numpy را از requirements.txt حذف می‌کنیم تا جداگانه ساخته شود
-            echo "scikit-learn==1.5.0" > requirements.txt
-            echo "hazm" >> requirements.txt
-            echo "pyTelegramBotAPI" >> requirements.txt
-            
+            # --- ۳. به‌روزرسانی ابزارهای ساخت ---
             python3.11 -m pip install --upgrade pip setuptools wheel
 
-            # --- ۴. [اصلاح کلیدی] ساخت مرحله‌ای ---
+            # --- ۴. [استراتژی نهایی] ساخت مرحله‌ای و ایزوله ---
             
-            # مرحله اول: ساخت numpy به صورت تک‌رشته‌ای برای جلوگیری از خطای حافظه
-            echo "--- Building numpy (single-threaded)... ---"
-            export NPY_NUM_BUILD_JOBS=1
-            python3.11 -m pip wheel --verbose --wheel-dir=./wheels numpy
+            # مرحله اول: ساخت 'numpy' به تنهایی
+            # این کار تمام منابع را به این بسته سنگین اختصاص می‌دهد.
+            echo "--- Step 1: Building 'numpy' in isolation... ---"
+            python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels "numpy==1.26.4"
+            
+            # مرحله دوم: ساخت 'scipy' که به numpy وابسته است
+            echo "--- Step 2: Building 'scipy' using the pre-built numpy... ---"
+            python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels --find-links=./wheels "scipy==1.13.1"
 
-            # مرحله دوم: ساخت بقیه بسته‌ها با استفاده از wheel آماده شده‌ی numpy
-            echo "--- Building the rest of the packages... ---"
-            python3.11 -m pip wheel --verbose --wheel-dir=./wheels --find-links=./wheels -r requirements.txt
+            # مرحله سوم: ساخت 'scikit-learn'
+            echo "--- Step 3: Building 'scikit-learn'... ---"
+            python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels --find-links=./wheels "scikit-learn==1.5.0"
 
-            # --- ۵. بسته‌بندی و خروجی ---
+            # مرحله چهارم: ساخت بقیه بسته‌ها
+            echo "--- Step 4: Building remaining packages ('hazm' and 'pyTelegramBotAPI')... ---"
+            echo "hazm" > other_requirements.txt
+            echo "pyTelegramBotAPI" >> other_requirements.txt
+            python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels --find-links=./wheels -r other_requirements.txt
+
+            # --- ۵. دیباگ و بررسی نهایی ---
+            echo "--- Final check: Listing contents of the wheels directory ---"
+            ls -lR wheels
+
+            # --- ۶. بسته‌بندی و خروجی ---
             echo "--- Packaging all wheels into a single zip file... ---"
             zip -r freebsd-wheels.zip wheels/
             
@@ -96,7 +107,7 @@ jobs:
           echo "Copy and run these commands on your FreeBSD server:"
           echo ""
           echo "wget '${DOWNLOAD_URL}' -O wheels.zip && unzip -o wheels.zip"
-          echo "# Create a requirements file including numpy on your server"
-          echo "pip install --no-index --find-links=./wheels numpy scikit-learn hazm pyTelegramBotAPI"
+          echo "# Create a requirements.txt file with all packages on your server"
+          echo "pip install --no-index --find-links=./wheels -r requirements.txt"
           echo ""
           echo "===================================================================="
