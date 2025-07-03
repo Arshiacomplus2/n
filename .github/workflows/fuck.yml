@@ -23,7 +23,6 @@ jobs:
           path: |
             ~/.cache/pip
             ./wheels
-          # از همان کش قبلی استفاده می‌کنیم
           key: ${{ runner.os }}-pip-freebsd-v4-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-freebsd-v4-
@@ -40,8 +39,6 @@ jobs:
 
             # --- ۱. نصب و آماده‌سازی زیرساخت ---
             pkg install -y python311 py311-pip gcc13 openblas lapack zip pkgconf cmake git
-
-            # ایجاد لینک نمادین برای 'python' جهت سازگاری با اسکریپت‌های ساخت
             ln -s /usr/local/bin/python3.11 /usr/local/bin/python
             
             # --- ۲. تنظیم متغیرهای محیطی ---
@@ -54,23 +51,30 @@ jobs:
             # --- ۳. به‌روزرسانی ابزارهای ساخت ---
             python3.11 -m pip install --upgrade pip setuptools wheel
 
-            # --- ۴. [استراتژی نهایی] ساخت مرحله‌ای و ایزوله ---
-            
-            # مرحله اول: ساخت 'numpy' به تنهایی
-            # این کار تمام منابع را به این بسته سنگین اختصاص می‌دهد.
-            echo "--- Step 1: Building 'numpy' in isolation... ---"
-            python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels "numpy==1.26.4"
-            
-            # مرحله دوم: ساخت 'scipy' که به numpy وابسته است
-            echo "--- Step 2: Building 'scipy' using the pre-built numpy... ---"
-            python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels --find-links=./wheels "scipy==1.13.1"
+            # --- ۴. [استراتژی نهایی] ساخت مرحله‌ای با Wrapper ضد-تایم‌اوت ---
 
-            # مرحله سوم: ساخت 'scikit-learn'
-            echo "--- Step 3: Building 'scikit-learn'... ---"
-            python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels --find-links=./wheels "scikit-learn==1.5.0"
+            # تعریف یک تابع برای اجرای دستورات زمان‌بر
+            run_with_keepalive() {
+              echo "--- Running command with keep-alive: $1 ---"
+              # این دستور trap تضمین می‌کند که فرآیند پس‌زمینه همیشه در انتها کشته می‌شود
+              trap 'kill $KEEPALIVE_PID' EXIT
+              while true; do echo -n "."; sleep 60; done &
+              KEEPALIVE_PID=$!
+              # اجرای دستور اصلی
+              sh -c "$1"
+            }
 
-            # مرحله چهارم: ساخت بقیه بسته‌ها
-            echo "--- Step 4: Building remaining packages ('hazm' and 'pyTelegramBotAPI')... ---"
+            # مرحله اول: ساخت 'numpy' با wrapper
+            run_with_keepalive 'python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels "numpy==1.26.4"'
+            
+            # مرحله دوم: ساخت 'scipy' با wrapper
+            run_with_keepalive 'python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels --find-links=./wheels "scipy==1.13.1"'
+
+            # مرحله سوم: ساخت 'scikit-learn' با wrapper
+            run_with_keepalive 'python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels --find-links=./wheels "scikit-learn==1.5.0"'
+
+            # مرحله چهارم: ساخت بقیه بسته‌ها (اینها معمولاً سریع هستند و نیازی به wrapper ندارند)
+            echo "--- Step 4: Building remaining packages... ---"
             echo "hazm" > other_requirements.txt
             echo "pyTelegramBotAPI" >> other_requirements.txt
             python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels --find-links=./wheels -r other_requirements.txt
@@ -102,12 +106,5 @@ jobs:
           echo "✅🎉 Workflow Complete! Your direct download link is ready: 🎉✅"
           echo ""
           echo "${DOWNLOAD_URL}"
-          echo ""
-          echo "===================================================================="
-          echo "Copy and run these commands on your FreeBSD server:"
-          echo ""
-          echo "wget '${DOWNLOAD_URL}' -O wheels.zip && unzip -o wheels.zip"
-          echo "# Create a requirements.txt file with all packages on your server"
-          echo "pip install --no-index --find-links=./wheels -r requirements.txt"
           echo ""
           echo "===================================================================="
