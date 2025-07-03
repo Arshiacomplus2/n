@@ -23,9 +23,10 @@ jobs:
           path: |
             ~/.cache/pip
             ./wheels
-          key: ${{ runner.os }}-pip-freebsd-v4-${{ hashFiles('**/requirements.txt') }}
+          # <--- [اصلاح نهایی و قطعی] کلید کش به v5 تغییر یافت تا کش خراب قبلی نادیده گرفته شود.
+          key: ${{ runner.os }}-pip-freebsd-v5-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
-            ${{ runner.os }}-pip-freebsd-v4-
+            ${{ runner.os }}-pip-freebsd-v5-
 
       - name: Start FreeBSD VM, Build, and Package
         uses: vmactions/freebsd-vm@v1
@@ -39,6 +40,9 @@ jobs:
 
             # --- ۱. نصب و آماده‌سازی زیرساخت ---
             pkg install -y python311 py311-pip gcc13 openblas lapack zip pkgconf cmake git
+            
+            # ایجاد لینک نمادین برای 'python' جهت سازگاری کامل با اسکریپت‌های ساخت
+            echo "--- Creating 'python' symlink to python3.11 ---"
             ln -s /usr/local/bin/python3.11 /usr/local/bin/python
             
             # --- ۲. تنظیم متغیرهای محیطی ---
@@ -51,9 +55,9 @@ jobs:
             # --- ۳. به‌روزرسانی ابزارهای ساخت ---
             python3.11 -m pip install --upgrade pip setuptools wheel
 
-            # --- ۴. [استراتژی نهایی] ساخت مرحله‌ای با Wrapper ضد-تایم‌اوت ---
-
-            # تعریف یک تابع برای اجرای دستورات زمان‌بر
+            # --- ۴. ساخت مرحله‌ای با Wrapper ضد-تایم‌اوت ---
+            
+            # تعریف یک تابع برای اجرای دستورات زمان‌بر و جلوگیری از تایم‌اوت GitHub Actions
             run_with_keepalive() {
               echo "--- Running command with keep-alive: $1 ---"
               # این دستور trap تضمین می‌کند که فرآیند پس‌زمینه همیشه در انتها کشته می‌شود
@@ -106,5 +110,12 @@ jobs:
           echo "✅🎉 Workflow Complete! Your direct download link is ready: 🎉✅"
           echo ""
           echo "${DOWNLOAD_URL}"
+          echo ""
+          echo "===================================================================="
+          echo "Copy and run these commands on your FreeBSD server:"
+          echo ""
+          echo "wget '${DOWNLOAD_URL}' -O wheels.zip && unzip -o wheels.zip"
+          echo "# Create a requirements.txt file with all packages on your server"
+          echo "pip install --no-index --find-links=./wheels numpy scikit-learn scipy hazm pyTelegramBotAPI"
           echo ""
           echo "===================================================================="
