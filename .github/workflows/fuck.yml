@@ -23,7 +23,7 @@ jobs:
           path: |
             ~/.cache/pip
             ./wheels
-          # کلید کش را طبق درخواست شما تغییر نمی‌دهیم تا از بیلد موفق قبلی استفاده شود
+          # از همان کش قبلی استفاده می‌کنیم چون زیرساخت درست است
           key: ${{ runner.os }}-pip-freebsd-v4-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-freebsd-v4-
@@ -38,40 +38,42 @@ jobs:
             # توقف اسکریپت در صورت بروز اولین خطا
             set -e
 
-            # نصب تمام وابستگی‌های سیستمی
+            # --- ۱. نصب و آماده‌سازی زیرساخت ---
             pkg install -y python311 py311-pip gcc13 openblas lapack zip pkgconf cmake git
-
-            # ایجاد لینک نمادین برای 'python'
             ln -s /usr/local/bin/python3.11 /usr/local/bin/python
             
-            # تنظیم متغیرهای محیطی
+            # --- ۲. تنظیم متغیرهای محیطی ---
             export FC=/usr/local/bin/gfortran13
             export CC=/usr/local/bin/gcc13
             export CXX=/usr/local/bin/g++13
             export PKG_CONFIG_PATH=/usr/local/libdata/pkgconfig
             export PATH="/usr/local/bin:${PATH}"
             
-            # آماده‌سازی نیازمندی‌های پایتون
+            # --- ۳. آماده‌سازی نیازمندی‌های پایتون ---
+            # numpy را از requirements.txt حذف می‌کنیم تا جداگانه ساخته شود
             echo "scikit-learn==1.5.0" > requirements.txt
             echo "hazm" >> requirements.txt
             echo "pyTelegramBotAPI" >> requirements.txt
             
-            # به‌روزرسانی ابزارهای ساخت
             python3.11 -m pip install --upgrade pip setuptools wheel
 
-            # ساخت Wheel ها
-            echo "--- Building all package wheels from requirements.txt ---"
-            python3.11 -m pip wheel --verbose --wheel-dir=./wheels -r requirements.txt
+            # --- ۴. [اصلاح کلیدی] ساخت مرحله‌ای ---
+            
+            # مرحله اول: ساخت numpy به صورت تک‌رشته‌ای برای جلوگیری از خطای حافظه
+            echo "--- Building numpy (single-threaded)... ---"
+            export NPY_NUM_BUILD_JOBS=1
+            python3.11 -m pip wheel --verbose --wheel-dir=./wheels numpy
 
-            # بسته‌بندی فایل‌ها
+            # مرحله دوم: ساخت بقیه بسته‌ها با استفاده از wheel آماده شده‌ی numpy
+            echo "--- Building the rest of the packages... ---"
+            python3.11 -m pip wheel --verbose --wheel-dir=./wheels --find-links=./wheels -r requirements.txt
+
+            # --- ۵. بسته‌بندی و خروجی ---
             echo "--- Packaging all wheels into a single zip file... ---"
             zip -r freebsd-wheels.zip wheels/
             
-            # ساخت تگ برای ریلیز
             TAG_NAME="freebsd-wheels-$(date +'%Y%m%d-%H%M%S')"
             echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
-            
-            # <--- [اصلاح کلیدی ۱] دستور mv حذف شد. فایل زیپ در پوشه کاری باقی می‌ماند.
 
       - name: Create GitHub Release and Upload Asset
         env:
@@ -79,7 +81,6 @@ jobs:
         run: |
           TAG="${{ steps.build_step.outputs.tag_name }}"
           
-          # <--- [اصلاح کلیدی ۲] مسیر فایل به صورت نسبی و بدون /tmp/ استفاده می‌شود.
           gh release create "${TAG}" freebsd-wheels.zip \
             --title "FreeBSD Wheels - ${TAG}" \
             --notes "Wheels for Python 3.11 on FreeBSD, built automatically."
@@ -95,7 +96,7 @@ jobs:
           echo "Copy and run these commands on your FreeBSD server:"
           echo ""
           echo "wget '${DOWNLOAD_URL}' -O wheels.zip && unzip -o wheels.zip"
-          echo "# Make sure a corresponding requirements.txt file exists on your server"
-          echo "pip install --no-index --find-links=./wheels -r requirements.txt"
+          echo "# Create a requirements file including numpy on your server"
+          echo "pip install --no-index --find-links=./wheels numpy scikit-learn hazm pyTelegramBotAPI"
           echo ""
           echo "===================================================================="
