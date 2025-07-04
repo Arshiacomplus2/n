@@ -23,7 +23,7 @@ jobs:
           path: |
             ~/.cache/pip
             ./wheels
-          # <--- [اصلاح نهایی] کلید کش به v10 تغییر یافت تا یک اجرای 100% تمیز تضمین شود.
+          # چون اجرای قبلی خیلی زود fail شد، کش v10 ساخته نشده، پس از همین استفاده می‌کنیم.
           key: ${{ runner.os }}-pip-freebsd-v10-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
             ${{ runner.os }}-pip-freebsd-v10-
@@ -37,11 +37,22 @@ jobs:
           run: |
             set -e
 
-            # --- ۱. [راه حل نهایی] ایجاد حافظه مجازی (Swap) برای جلوگیری از خطای حافظه ---
-            echo "--- Creating and activating a 4GB swap file... ---"
+            # --- ۱. [راه حل نهایی] ایجاد حافظه مجازی (Swap) به روش استاندارد FreeBSD ---
+            echo "--- Creating a 4GB swap file... ---"
             dd if=/dev/zero of=/swapfile bs=1m count=4096
             chmod 0600 /swapfile
-            swapon /swapfile
+            
+            echo "--- Configuring swap in /etc/rc.conf... ---"
+            # این خط به سیستم می‌گوید که از این فایل به عنوان swap استفاده کند
+            echo 'swapfile="/swapfile"' >> /etc/rc.conf
+            
+            echo "--- Starting the swap service... ---"
+            # این سرویس رسمی، swap را به درستی فعال می‌کند
+            service swap start
+            
+            echo "--- Verifying swap status... ---"
+            # این دستور وضعیت swap را نشان می‌دهد تا مطمئن شویم فعال شده
+            swapinfo -h
             
             # --- ۲. نصب کامل زیرساخت ---
             pkg install -y python311 py311-pip python gcc13 openblas lapack zip pkgconf cmake git ninja
