@@ -23,10 +23,10 @@ jobs:
           path: |
             ~/.cache/pip
             ./wheels
-          # <--- [اصلاح نهایی و قطعی] کلید کش به v9 تغییر یافت تا یک اجرای 100% تمیز و بدون خطا تضمین شود.
-          key: ${{ runner.os }}-pip-freebsd-v9-${{ hashFiles('**/requirements.txt') }}
+          # <--- [اصلاح نهایی] کلید کش به v10 تغییر یافت تا یک اجرای 100% تمیز تضمین شود.
+          key: ${{ runner.os }}-pip-freebsd-v10-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
-            ${{ runner.os }}-pip-freebsd-v9-
+            ${{ runner.os }}-pip-freebsd-v10-
 
       - name: Start FreeBSD VM, Build, and Package
         uses: vmactions/freebsd-vm@v1
@@ -37,22 +37,27 @@ jobs:
           run: |
             set -e
 
-            # --- ۱. نصب کامل زیرساخت ---
+            # --- ۱. [راه حل نهایی] ایجاد حافظه مجازی (Swap) برای جلوگیری از خطای حافظه ---
+            echo "--- Creating and activating a 4GB swap file... ---"
+            dd if=/dev/zero of=/swapfile bs=1m count=4096
+            chmod 0600 /swapfile
+            swapon /swapfile
+            
+            # --- ۲. نصب کامل زیرساخت ---
             pkg install -y python311 py311-pip python gcc13 openblas lapack zip pkgconf cmake git ninja
             
-            # --- ۲. تنظیم متغیرهای محیطی برای کامپایل ---
+            # --- ۳. تنظیم متغیرهای محیطی برای کامپایل ---
             export FC=/usr/local/bin/gfortran13
             export CC=/usr/local/bin/gcc13
             export CXX=/usr/local/bin/g++13
             export PKG_CONFIG_PATH=/usr/local/libdata/pkgconfig
             export PATH="/usr/local/bin:${PATH}"
 
-            # --- ۳. [راه حل نهایی] کنترل کامل و مطلق روی کامپایل موازی ---
-            # هر دو متغیر را برای حداکثر اطمینان تنظیم می‌کنیم تا کامپایل تک‌رشته‌ای شود.
+            # --- ۴. کنترل کامل روی کامپایل موازی (برای اطمینان) ---
             export NINJA_ARGS="-j1"
             export NPY_NUM_BUILD_JOBS=1
 
-            # --- ۴. آماده‌سازی و ساخت مرحله‌ای ---
+            # --- ۵. آماده‌سازی و ساخت مرحله‌ای ---
             python3.11 -m pip install --upgrade pip setuptools wheel
 
             run_with_keepalive() {
@@ -64,7 +69,7 @@ jobs:
             }
             
             # مرحله اول: ساخت numpy به صورت ایزوله و تک‌رشته‌ای
-            echo "--- Step 1: Building numpy (single-threaded and isolated)... ---"
+            echo "--- Step 1: Building numpy (single-threaded, isolated, with swap)... ---"
             run_with_keepalive 'python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels "numpy==1.26.4"'
 
             # مرحله دوم: ساخت بقیه بسته‌ها
@@ -75,7 +80,7 @@ jobs:
             echo "pyTelegramBotAPI" >> other_requirements.txt
             run_with_keepalive 'python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels --find-links=./wheels -r other_requirements.txt'
 
-            # --- ۵. بسته‌بندی و خروجی ---
+            # --- ۶. بسته‌بندی و خروجی ---
             echo "--- Final check: Listing contents of the wheels directory ---"
             ls -lR wheels
             echo "--- Packaging all wheels into a single zip file... ---"
