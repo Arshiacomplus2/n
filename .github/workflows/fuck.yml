@@ -23,10 +23,10 @@ jobs:
           path: |
             ~/.cache/pip
             ./wheels
-          # <--- [اصلاح نهایی و قطعی] کلید کش به v6 تغییر یافت تا یک اجرای 100% تمیز تضمین شود.
+          # <--- [اصلاح نهایی] کلید کش به v8 تغییر یافت تا یک اجرای 100% تمیز تضمین شود.
           key: ${{ runner.os }}-pip-freebsd-v5-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
-            ${{ runner.os }}-pip-freebsd-v6-
+            ${{ runner.os }}-pip-freebsd-v5-
 
       - name: Start FreeBSD VM, Build, and Package
         uses: vmactions/freebsd-vm@v1
@@ -37,40 +37,44 @@ jobs:
           run: |
             set -e
 
-            # --- ۱. [اصلاح نهایی] نصب بسته‌ها به روش اصولی FreeBSD ---
-            # با نصب بسته 'python'، لینک‌های استاندارد به صورت خودکار و صحیح ایجاد می‌شوند.
-            pkg install -y python311 py311-pip python gcc13 openblas lapack zip pkgconf cmake git
+            # --- ۱. نصب بسته‌ها ---
+            pkg install -y python311 py311-pip python gcc13 openblas lapack zip pkgconf cmake git ninja
             
-            # دستور 'ln -s' دستی حذف شد چون دیگر نیازی به آن نیست.
-            
-            # --- ۲. تنظیم متغیرهای محیطی ---
+            # --- ۲. تنظیم متغیرهای محیطی برای کامپایل ---
             export FC=/usr/local/bin/gfortran13
             export CC=/usr/local/bin/gcc13
             export CXX=/usr/local/bin/g++13
             export PKG_CONFIG_PATH=/usr/local/libdata/pkgconfig
             export PATH="/usr/local/bin:${PATH}"
-            
-            # --- ۳. به‌روزرسانی ابزارهای ساخت ---
+
+            # --- ۳. [راه حل نهایی] کنترل کامل روی کامپایل موازی ---
+            # این دستور به Ninja (سیستم ساخت numpy/scipy/sklearn) می‌گوید که فقط از یک هسته استفاده کند.
+            # این کار مشکل کمبود حافظه را به طور قطعی حل می‌کند.
+            export NINJA_ARGS="-j1"
+
+            # --- ۴. آماده‌سازی و ساخت مرحله‌ای ---
             python3.11 -m pip install --upgrade pip setuptools wheel
 
-            # --- ۴. ساخت مرحله‌ای با Wrapper ضد-تایم‌اوت ---
             run_with_keepalive() {
-              echo "--- Running command with keep-alive: $1 ---"
+              echo "--- Running build with keep-alive wrapper ---"
               trap 'kill $KEEPALIVE_PID' EXIT
               while true; do echo -n "."; sleep 60; done &
               KEEPALIVE_PID=$!
+              # اجرای دستور اصلی
               sh -c "$1"
             }
-
-            # مراحل ساخت (این بخش کاملاً درست است)
-            run_with_keepalive 'python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels "numpy==1.26.4"'
-            run_with_keepalive 'python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels --find-links=./wheels "scipy==1.13.1"'
-            run_with_keepalive 'python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels --find-links=./wheels "scikit-learn==1.5.0"'
             
-            echo "--- Step 4: Building remaining packages... ---"
-            echo "hazm" > other_requirements.txt
+            # مرحله اول: ساخت numpy به صورت ایزوله و تک‌رشته‌ای
+            echo "--- Step 1: Building numpy (single-threaded and isolated)... ---"
+            run_with_keepalive 'python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels "numpy==1.26.4"'
+
+            # مرحله دوم: ساخت بقیه بسته‌ها با استفاده از wheel آماده شده numpy
+            echo "--- Step 2: Building all other packages... ---"
+            echo "scipy==1.13.1" > other_requirements.txt
+            echo "scikit-learn==1.5.0" >> other_requirements.txt
+            echo "hazm" >> other_requirements.txt
             echo "pyTelegramBotAPI" >> other_requirements.txt
-            python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels --find-links=./wheels -r other_requirements.txt
+            run_with_keepalive 'python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels --find-links=./wheels -r other_requirements.txt'
 
             # --- ۵. بسته‌بندی و خروجی ---
             echo "--- Packaging all wheels into a single zip file... ---"
@@ -85,7 +89,6 @@ jobs:
         run: |
           TAG="${{ steps.build_step.outputs.tag_name }}"
           gh release create "${TAG}" freebsd-wheels.zip --title "FreeBSD Wheels - ${TAG}" --notes "Wheels for Python 3.11 on FreeBSD, built automatically."
-          # ... بقیه کد برای نمایش لینک ...
           DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/freebsd-wheels.zip"
           echo "==================== ✅ Workflow Complete! ✅ ===================="
           echo "Your direct download link is: ${DOWNLOAD_URL}"
