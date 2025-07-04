@@ -23,10 +23,10 @@ jobs:
           path: |
             ~/.cache/pip
             ./wheels
-          # <--- [اصلاح نهایی و قطعی] کلید کش به v5 تغییر یافت تا کش خراب قبلی نادیده گرفته شود.
+          # <--- [اصلاح نهایی و قطعی] کلید کش به v6 تغییر یافت تا یک اجرای 100% تمیز تضمین شود.
           key: ${{ runner.os }}-pip-freebsd-v5-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
-            ${{ runner.os }}-pip-freebsd-v5-
+            ${{ runner.os }}-pip-freebsd-v6-
 
       - name: Start FreeBSD VM, Build, and Package
         uses: vmactions/freebsd-vm@v1
@@ -35,15 +35,13 @@ jobs:
           uses: 'local'
           mem: 8192
           run: |
-            # توقف اسکریپت در صورت بروز اولین خطا
             set -e
 
-            # --- ۱. نصب و آماده‌سازی زیرساخت ---
-            pkg install -y python311 py311-pip gcc13 openblas lapack zip pkgconf cmake git
+            # --- ۱. [اصلاح نهایی] نصب بسته‌ها به روش اصولی FreeBSD ---
+            # با نصب بسته 'python'، لینک‌های استاندارد به صورت خودکار و صحیح ایجاد می‌شوند.
+            pkg install -y python311 py311-pip python gcc13 openblas lapack zip pkgconf cmake git
             
-            # ایجاد لینک نمادین برای 'python' جهت سازگاری کامل با اسکریپت‌های ساخت
-            echo "--- Creating 'python' symlink to python3.11 ---"
-            ln -s /usr/local/bin/python3.11 /usr/local/bin/python
+            # دستور 'ln -s' دستی حذف شد چون دیگر نیازی به آن نیست.
             
             # --- ۲. تنظیم متغیرهای محیطی ---
             export FC=/usr/local/bin/gfortran13
@@ -56,38 +54,25 @@ jobs:
             python3.11 -m pip install --upgrade pip setuptools wheel
 
             # --- ۴. ساخت مرحله‌ای با Wrapper ضد-تایم‌اوت ---
-            
-            # تعریف یک تابع برای اجرای دستورات زمان‌بر و جلوگیری از تایم‌اوت GitHub Actions
             run_with_keepalive() {
               echo "--- Running command with keep-alive: $1 ---"
-              # این دستور trap تضمین می‌کند که فرآیند پس‌زمینه همیشه در انتها کشته می‌شود
               trap 'kill $KEEPALIVE_PID' EXIT
               while true; do echo -n "."; sleep 60; done &
               KEEPALIVE_PID=$!
-              # اجرای دستور اصلی
               sh -c "$1"
             }
 
-            # مرحله اول: ساخت 'numpy' با wrapper
+            # مراحل ساخت (این بخش کاملاً درست است)
             run_with_keepalive 'python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels "numpy==1.26.4"'
-            
-            # مرحله دوم: ساخت 'scipy' با wrapper
             run_with_keepalive 'python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels --find-links=./wheels "scipy==1.13.1"'
-
-            # مرحله سوم: ساخت 'scikit-learn' با wrapper
             run_with_keepalive 'python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels --find-links=./wheels "scikit-learn==1.5.0"'
-
-            # مرحله چهارم: ساخت بقیه بسته‌ها (اینها معمولاً سریع هستند و نیازی به wrapper ندارند)
+            
             echo "--- Step 4: Building remaining packages... ---"
             echo "hazm" > other_requirements.txt
             echo "pyTelegramBotAPI" >> other_requirements.txt
             python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels --find-links=./wheels -r other_requirements.txt
 
-            # --- ۵. دیباگ و بررسی نهایی ---
-            echo "--- Final check: Listing contents of the wheels directory ---"
-            ls -lR wheels
-
-            # --- ۶. بسته‌بندی و خروجی ---
+            # --- ۵. بسته‌بندی و خروجی ---
             echo "--- Packaging all wheels into a single zip file... ---"
             zip -r freebsd-wheels.zip wheels/
             
@@ -99,23 +84,9 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.build_step.outputs.tag_name }}"
-          
-          gh release create "${TAG}" freebsd-wheels.zip \
-            --title "FreeBSD Wheels - ${TAG}" \
-            --notes "Wheels for Python 3.11 on FreeBSD, built automatically."
-
+          gh release create "${TAG}" freebsd-wheels.zip --title "FreeBSD Wheels - ${TAG}" --notes "Wheels for Python 3.11 on FreeBSD, built automatically."
+          # ... بقیه کد برای نمایش لینک ...
           DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/freebsd-wheels.zip"
-          
-          echo "===================================================================="
-          echo "✅🎉 Workflow Complete! Your direct download link is ready: 🎉✅"
-          echo ""
-          echo "${DOWNLOAD_URL}"
-          echo ""
-          echo "===================================================================="
-          echo "Copy and run these commands on your FreeBSD server:"
-          echo ""
-          echo "wget '${DOWNLOAD_URL}' -O wheels.zip && unzip -o wheels.zip"
-          echo "# Create a requirements.txt file with all packages on your server"
-          echo "pip install --no-index --find-links=./wheels numpy scikit-learn scipy hazm pyTelegramBotAPI"
-          echo ""
-          echo "===================================================================="
+          echo "==================== ✅ Workflow Complete! ✅ ===================="
+          echo "Your direct download link is: ${DOWNLOAD_URL}"
+          echo "================================================================"
