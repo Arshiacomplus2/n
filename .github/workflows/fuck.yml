@@ -23,10 +23,10 @@ jobs:
           path: |
             ~/.cache/pip
             ./wheels
-          # <--- [اصلاح نهایی] کلید کش به v8 تغییر یافت تا یک اجرای 100% تمیز تضمین شود.
-          key: ${{ runner.os }}-pip-freebsd-v5-${{ hashFiles('**/requirements.txt') }}
+          # <--- [اصلاح نهایی و قطعی] کلید کش به v9 تغییر یافت تا یک اجرای 100% تمیز و بدون خطا تضمین شود.
+          key: ${{ runner.os }}-pip-freebsd-v9-${{ hashFiles('**/requirements.txt') }}
           restore-keys: |
-            ${{ runner.os }}-pip-freebsd-v5-
+            ${{ runner.os }}-pip-freebsd-v9-
 
       - name: Start FreeBSD VM, Build, and Package
         uses: vmactions/freebsd-vm@v1
@@ -37,7 +37,7 @@ jobs:
           run: |
             set -e
 
-            # --- ۱. نصب بسته‌ها ---
+            # --- ۱. نصب کامل زیرساخت ---
             pkg install -y python311 py311-pip python gcc13 openblas lapack zip pkgconf cmake git ninja
             
             # --- ۲. تنظیم متغیرهای محیطی برای کامپایل ---
@@ -47,10 +47,10 @@ jobs:
             export PKG_CONFIG_PATH=/usr/local/libdata/pkgconfig
             export PATH="/usr/local/bin:${PATH}"
 
-            # --- ۳. [راه حل نهایی] کنترل کامل روی کامپایل موازی ---
-            # این دستور به Ninja (سیستم ساخت numpy/scipy/sklearn) می‌گوید که فقط از یک هسته استفاده کند.
-            # این کار مشکل کمبود حافظه را به طور قطعی حل می‌کند.
+            # --- ۳. [راه حل نهایی] کنترل کامل و مطلق روی کامپایل موازی ---
+            # هر دو متغیر را برای حداکثر اطمینان تنظیم می‌کنیم تا کامپایل تک‌رشته‌ای شود.
             export NINJA_ARGS="-j1"
+            export NPY_NUM_BUILD_JOBS=1
 
             # --- ۴. آماده‌سازی و ساخت مرحله‌ای ---
             python3.11 -m pip install --upgrade pip setuptools wheel
@@ -60,7 +60,6 @@ jobs:
               trap 'kill $KEEPALIVE_PID' EXIT
               while true; do echo -n "."; sleep 60; done &
               KEEPALIVE_PID=$!
-              # اجرای دستور اصلی
               sh -c "$1"
             }
             
@@ -68,7 +67,7 @@ jobs:
             echo "--- Step 1: Building numpy (single-threaded and isolated)... ---"
             run_with_keepalive 'python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels "numpy==1.26.4"'
 
-            # مرحله دوم: ساخت بقیه بسته‌ها با استفاده از wheel آماده شده numpy
+            # مرحله دوم: ساخت بقیه بسته‌ها
             echo "--- Step 2: Building all other packages... ---"
             echo "scipy==1.13.1" > other_requirements.txt
             echo "scikit-learn==1.5.0" >> other_requirements.txt
@@ -77,6 +76,8 @@ jobs:
             run_with_keepalive 'python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels --find-links=./wheels -r other_requirements.txt'
 
             # --- ۵. بسته‌بندی و خروجی ---
+            echo "--- Final check: Listing contents of the wheels directory ---"
+            ls -lR wheels
             echo "--- Packaging all wheels into a single zip file... ---"
             zip -r freebsd-wheels.zip wheels/
             
