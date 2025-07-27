@@ -1,65 +1,50 @@
-name: Build Nuitka Module for FreeBSD 14.1
+name: Build Nuitka Module via Cross-Compilation
 
-# این اکشن فقط به صورت دستی از طریق تب Actions در گیت‌هاب اجرا می‌شود
 on:
   workflow_dispatch:
 
 jobs:
-  build-on-freebsd:
-    name: Compile Python on FreeBSD 14.1 (amd64)
-    # ===== تغییر: استفاده از macos-12 برای پایداری بیشتر شبیه‌ساز =====
-    runs-on: macos-12
+  build:
+    name: Cross-Compile for FreeBSD on Linux
+    # از یک رانر سریع و در دسترس اوبونتو استفاده می‌کنیم
+    runs-on: ubuntu-latest
 
     steps:
-      # مرحله ۱: راه‌اندازی ماشین مجازی FreeBSD با مشخصات دقیق سرور شما
-      - name: Setup FreeBSD VM
-        uses: vmactions/freebsd-vm@v1
-        with:
-          usesh: true
-          release: '14.1' # مطابق با نسخه سرور شما
-
-      # مرحله ۲: کپی کردن کدهای پروژه شما به داخل ماشین مجازی
+      # مرحله ۱: کپی کردن کدها (بدون تغییر)
       - name: Checkout project code
         uses: actions/checkout@v4
-        with:
-          path: filmbin_project # کدها در این پوشه قرار می‌گیرند
 
-      # مرحله ۳: نصب نیازمندی‌ها و کامپایل با Nuitka در داخل FreeBSD
-      - name: Install dependencies and Compile with Nuitka
+      # مرحله ۲: نصب ابزارهای لازم برای کامپایل متقاطع
+      - name: Install Cross-Compilation Tools
         run: |
-          echo ">>> Updating package manager..."
-          pkg update -f
+          sudo apt-get update
+          # نصب کامپایلر C و ابزارهای لازم برای FreeBSD
+          sudo apt-get install -y clang lld
           
-          echo ">>> Installing Python 3.11 and pip..."
-          # ما دقیقاً نسخه 3.11 پایتون را نصب می‌کنیم
-          pkg install -y python311 py311-pip
-          
-          echo ">>> Installing Python packages..."
-          # نیازمندی‌های پروژه را با pip مخصوص پایتون 3.11 نصب می‌کنیم
-          python3.11 -m pip install fastapi uvicorn httpx jinja2 nuitka
-          
-          echo ">>> Changing directory to project folder..."
-          cd filmbin_project
-          
-          echo ">>> Starting Nuitka compilation for Python 3.11..."
-          # دستور کامپایل هیولا با استفاده از python3.11
-          python3.11 -m nuitka --module \
-            --jobs=2 \
+      # مرحله ۳: نصب Nuitka و نیازمندی‌های پایتون
+      - name: Set up Python and Install Dependencies
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11' # مطابق با نسخه سرور شما
+      - run: python -m pip install --upgrade pip nuitka fastapi uvicorn httpx jinja2
+
+      # مرحله ۴: اجرای Nuitka با تنظیمات کامپایل متقاطع
+      - name: Run Nuitka Cross-Compilation
+        run: |
+          python -m nuitka --module \
+            --jobs=$(nproc) \
             --nofollow-import-to=tkinter,unittest \
             --enable-plugin=anti-bloat \
             --python-flag=-OO \
             --output-dir=build \
+            --target=freebsd \
+            --clang-version=14 \
             main.py
-          echo ">>> Nuitka compilation finished successfully!"
-
-      # مرحله ۴: آپلود کردن فایل نهایی به عنوان آرتیفکت قابل دانلود
+      
+      # مرحله ۵: آپلود آرتیفکت نهایی (بدون تغییر)
       - name: Upload compiled module as artifact
         uses: actions/upload-artifact@v4
         with:
-          # اسم فایلی که در نهایت دانلود خواهید کرد
           name: filmbin-freebsd-14.1-py3.11-amd64
-          # مسیر دقیق فایل کامپایل شده در ماشین مجازی
-          # نام فایل .so شامل نسخه پایتون و معماری خواهد بود
-          path: filmbin_project/build/main.so 
-          # فایل تا ۷ روز برای دانلود در دسترس خواهد بود
+          path: build/main.so
           retention-days: 7
