@@ -1,112 +1,65 @@
-# نام فایل: .github/workflows/build-freebsd-wheels.yml
+name: Build Nuitka Module for FreeBSD 14.1
 
-name: Build, Cache, and Release FreeBSD Wheels
-
+# این اکشن فقط به صورت دستی از طریق تب Actions در گیت‌هاب اجرا می‌شود
 on:
   workflow_dispatch:
 
-permissions:
-  contents: write
-
 jobs:
-  build-and-release:
-    timeout-minutes: 360
-    runs-on: ubuntu-latest
-    
+  build-on-freebsd:
+    name: Compile Python on FreeBSD 14.1 (amd64)
+    # از یک ماشین مجازی مک استفاده می‌کنیم چون اکشن شبیه‌ساز FreeBSD روی آن بهتر کار می‌کند
+    runs-on: macos-13
+
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Cache pip packages and wheels
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/pip
-            ./wheels
-          # چون اجرای قبلی خیلی زود fail شد، کش v10 ساخته نشده، پس از همین استفاده می‌کنیم.
-          key: ${{ runner.os }}-pip-freebsd-v10-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-freebsd-v10-
-
-      - name: Start FreeBSD VM, Build, and Package
+      # مرحله ۱: راه‌اندازی ماشین مجازی FreeBSD با مشخصات دقیق سرور شما
+      - name: Setup FreeBSD VM
         uses: vmactions/freebsd-vm@v1
-        id: build_step
         with:
-          uses: 'local'
-          mem: 8192
-          run: |
-            set -e
+          usesh: true
+          release: '14.1' # <<<< مطابق با نسخه سرور شما
 
-            # --- ۱. [راه حل نهایی] ایجاد حافظه مجازی (Swap) به روش استاندارد FreeBSD ---
-            echo "--- Creating a 4GB swap file... ---"
-            dd if=/dev/zero of=/swapfile bs=1m count=4096
-            chmod 0600 /swapfile
-            
-            echo "--- Configuring swap in /etc/rc.conf... ---"
-            # این خط به سیستم می‌گوید که از این فایل به عنوان swap استفاده کند
-            echo 'swapfile="/swapfile"' >> /etc/rc.conf
-            
-            echo "--- Starting the swap service... ---"
-            # این سرویس رسمی، swap را به درستی فعال می‌کند
-            service swap start
-            
-            echo "--- Verifying swap status... ---"
-            # این دستور وضعیت swap را نشان می‌دهد تا مطمئن شویم فعال شده
-            swapinfo -h
-            
-            # --- ۲. نصب کامل زیرساخت ---
-            pkg install -y python311 py311-pip python gcc13 openblas lapack zip pkgconf cmake git ninja
-            
-            # --- ۳. تنظیم متغیرهای محیطی برای کامپایل ---
-            export FC=/usr/local/bin/gfortran13
-            export CC=/usr/local/bin/gcc13
-            export CXX=/usr/local/bin/g++13
-            export PKG_CONFIG_PATH=/usr/local/libdata/pkgconfig
-            export PATH="/usr/local/bin:${PATH}"
+      # مرحله ۲: کپی کردن کدهای پروژه شما به داخل ماشین مجازی
+      - name: Checkout project code
+        uses: actions/checkout@v4
+        with:
+          path: filmbin_project # کدها در این پوشه قرار می‌گیرند
 
-            # --- ۴. کنترل کامل روی کامپایل موازی (برای اطمینان) ---
-            export NINJA_ARGS="-j1"
-            export NPY_NUM_BUILD_JOBS=1
-
-            # --- ۵. آماده‌سازی و ساخت مرحله‌ای ---
-            python3.11 -m pip install --upgrade pip setuptools wheel
-
-            run_with_keepalive() {
-              echo "--- Running build with keep-alive wrapper ---"
-              trap 'kill $KEEPALIVE_PID' EXIT
-              while true; do echo -n "."; sleep 60; done &
-              KEEPALIVE_PID=$!
-              sh -c "$1"
-            }
-            
-            # مرحله اول: ساخت numpy به صورت ایزوله و تک‌رشته‌ای
-            echo "--- Step 1: Building numpy (single-threaded, isolated, with swap)... ---"
-            run_with_keepalive 'python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels "numpy==1.26.4"'
-
-            # مرحله دوم: ساخت بقیه بسته‌ها
-            echo "--- Step 2: Building all other packages... ---"
-            echo "scipy==1.13.1" > other_requirements.txt
-            echo "scikit-learn==1.5.0" >> other_requirements.txt
-            echo "hazm" >> other_requirements.txt
-            echo "pyTelegramBotAPI" >> other_requirements.txt
-            run_with_keepalive 'python3.11 -m pip wheel --verbose --no-cache-dir --wheel-dir=./wheels --find-links=./wheels -r other_requirements.txt'
-
-            # --- ۶. بسته‌بندی و خروجی ---
-            echo "--- Final check: Listing contents of the wheels directory ---"
-            ls -lR wheels
-            echo "--- Packaging all wheels into a single zip file... ---"
-            zip -r freebsd-wheels.zip wheels/
-            
-            TAG_NAME="freebsd-wheels-$(date +'%Y%m%d-%H%M%S')"
-            echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
-
-      - name: Create GitHub Release and Upload Asset
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # مرحله ۳: نصب نیازمندی‌ها و کامپایل با Nuitka در داخل FreeBSD
+      - name: Install dependencies and Compile with Nuitka
         run: |
-          TAG="${{ steps.build_step.outputs.tag_name }}"
-          gh release create "${TAG}" freebsd-wheels.zip --title "FreeBSD Wheels - ${TAG}" --notes "Wheels for Python 3.11 on FreeBSD, built automatically."
-          DOWNLOAD_URL="https://github.com/${{ github.repository }}/releases/download/${TAG}/freebsd-wheels.zip"
-          echo "==================== ✅ Workflow Complete! ✅ ===================="
-          echo "Your direct download link is: ${DOWNLOAD_URL}"
-          echo "================================================================"
+          echo ">>> Updating package manager..."
+          pkg update -f
+          
+          echo ">>> Installing Python 3.11 and pip..."
+          # ما دقیقاً نسخه 3.11 پایتون را نصب می‌کنیم
+          pkg install -y python311 py311-pip
+          
+          echo ">>> Installing Python packages..."
+          # نیازمندی‌های پروژه را با pip مخصوص پایتون 3.11 نصب می‌کنیم
+          python3.11 -m pip install fastapi uvicorn httpx jinja2 nuitka
+          
+          echo ">>> Changing directory to project folder..."
+          cd filmbin_project
+          
+          echo ">>> Starting Nuitka compilation for Python 3.11..."
+          # دستور کامپایل هیولا با استفاده از python3.11
+          python3.11 -m nuitka --module \
+            --jobs=2 \
+            --nofollow-import-to=tkinter,unittest \
+            --enable-plugin=anti-bloat \
+            --python-flag=-OO \
+            --output-dir=build \
+            main.py
+          echo ">>> Nuitka compilation finished successfully!"
+
+      # مرحله ۴: آپلود کردن فایل نهایی به عنوان آرتیفکت قابل دانلود
+      - name: Upload compiled module as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          # اسم فایلی که در نهایت دانلود خواهید کرد
+          name: filmbin-freebsd-14.1-py3.11-amd64
+          # مسیر دقیق فایل کامپایل شده در ماشین مجازی
+          # نام فایل .so شامل نسخه پایتون و معماری خواهد بود
+          path: filmbin_project/build/main.so 
+          # فایل تا ۷ روز برای دانلود در دسترس خواهد بود
+          retention-days: 7
