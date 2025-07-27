@@ -6,37 +6,40 @@ on:
 jobs:
   build:
     name: Compile Python on Ubuntu Linux
-    # از یک رانر سریع و همیشه در دسترس اوبونتو استفاده می‌کنیم
     runs-on: ubuntu-latest
 
     steps:
       # مرحله ۱: کپی کردن کدها
       - name: Checkout project code
         uses: actions/checkout@v4
+        with:
+          path: project
 
       # مرحله ۲: راه‌اندازی پایتون 3.11
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11' # مطابق با نسخه سرور شما
+          python-version: '3.11'
 
       # مرحله ۳: نصب نیازمندی‌ها
       - name: Install Python packages
         run: python -m pip install --upgrade pip nuitka fastapi uvicorn httpx jinja2
 
-      # مرحله ۴: اجرای دستور کامپایل استاندارد و پایدار Nuitka
+      # مرحله ۴: اجرای کامپایل
       - name: Run Nuitka compilation
         run: |
+          cd project
           python -m nuitka --module \
             --jobs=$(nproc) \
             --nofollow-import-to=tkinter,unittest \
             --output-dir=build \
             main.py
       
-      # مرحله ۵: آپلود آرتیفکت نهایی
+      # مرحله ۵: آپلود آرتیفکت نهایی (با مسیر اصلاح شده)
       - name: Upload compiled module as artifact
         uses: actions/upload-artifact@v4
         with:
           name: filmbin-linux-py3.11-amd64
-          path: build/main.so
+          # ***** این خط اصلاح شد *****
+          path: project/build/*.so
           retention-days: 7
