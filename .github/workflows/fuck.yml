@@ -1,50 +1,42 @@
-name: Build Nuitka Module via Cross-Compilation
+name: Build Nuitka Module on Linux
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    name: Cross-Compile for FreeBSD on Linux
-    # از یک رانر سریع و در دسترس اوبونتو استفاده می‌کنیم
+    name: Compile Python on Ubuntu Linux
+    # از یک رانر سریع و همیشه در دسترس اوبونتو استفاده می‌کنیم
     runs-on: ubuntu-latest
 
     steps:
-      # مرحله ۱: کپی کردن کدها (بدون تغییر)
+      # مرحله ۱: کپی کردن کدها
       - name: Checkout project code
         uses: actions/checkout@v4
 
-      # مرحله ۲: نصب ابزارهای لازم برای کامپایل متقاطع
-      - name: Install Cross-Compilation Tools
-        run: |
-          sudo apt-get update
-          # نصب کامپایلر C و ابزارهای لازم برای FreeBSD
-          sudo apt-get install -y clang lld
-          
-      # مرحله ۳: نصب Nuitka و نیازمندی‌های پایتون
-      - name: Set up Python and Install Dependencies
+      # مرحله ۲: راه‌اندازی پایتون 3.11
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11' # مطابق با نسخه سرور شما
-      - run: python -m pip install --upgrade pip nuitka fastapi uvicorn httpx jinja2
 
-      # مرحله ۴: اجرای Nuitka با تنظیمات کامپایل متقاطع
-      - name: Run Nuitka Cross-Compilation
+      # مرحله ۳: نصب نیازمندی‌ها
+      - name: Install Python packages
+        run: python -m pip install --upgrade pip nuitka fastapi uvicorn httpx jinja2
+
+      # مرحله ۴: اجرای دستور کامپایل استاندارد و پایدار Nuitka
+      - name: Run Nuitka compilation
         run: |
           python -m nuitka --module \
             --jobs=$(nproc) \
             --nofollow-import-to=tkinter,unittest \
-            --enable-plugin=anti-bloat \
-            --python-flag=-OO \
             --output-dir=build \
-            --target=freebsd \
-            --clang-version=14 \
             main.py
       
-      # مرحله ۵: آپلود آرتیفکت نهایی (بدون تغییر)
+      # مرحله ۵: آپلود آرتیفکت نهایی
       - name: Upload compiled module as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: filmbin-freebsd-14.1-py3.11-amd64
+          name: filmbin-linux-py3.11-amd64
           path: build/main.so
           retention-days: 7
