@@ -7,8 +7,8 @@ on:
 jobs:
   build-on-freebsd:
     name: Compile Python on FreeBSD 14.1 (amd64)
-    # از یک ماشین مجازی مک استفاده می‌کنیم چون اکشن شبیه‌ساز FreeBSD روی آن بهتر کار می‌کند
-    runs-on: macos-13
+    # ===== تغییر: استفاده از macos-12 برای پایداری بیشتر شبیه‌ساز =====
+    runs-on: macos-12
 
     steps:
       # مرحله ۱: راه‌اندازی ماشین مجازی FreeBSD با مشخصات دقیق سرور شما
@@ -16,7 +16,7 @@ jobs:
         uses: vmactions/freebsd-vm@v1
         with:
           usesh: true
-          release: '14.1' # <<<< مطابق با نسخه سرور شما
+          release: '14.1' # مطابق با نسخه سرور شما
 
       # مرحله ۲: کپی کردن کدهای پروژه شما به داخل ماشین مجازی
       - name: Checkout project code
